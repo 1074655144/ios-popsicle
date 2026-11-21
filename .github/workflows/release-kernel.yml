@@ -1,0 +1,48 @@
+name: release-kernel
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: 'Run id that produced xnu-kernel artifact'
+        required: true
+        default: '44885849346'
+      tag:
+        description: 'Release tag'
+        required: true
+        default: 'xnu-16.7.16-byron-20261121'
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Download xnu-kernel artifact from source run
+        uses: actions/download-artifact@v4
+        with:
+          name: xnu-kernel
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: kernel-dist
+
+      - name: List artifact contents
+        run: find kernel-dist -maxdepth 2 -type f -printf '%f  %s bytes\n'
+
+      - name: Create Release and upload kernel
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          cd kernel-dist
+          K=$(find . -type f -name 'kernel.development.pandora' | head -1)
+          test -n "$K" || { echo "kernel not found in artifact"; exit 1; }
+          sha256sum "$K" > SHA256SUMS
+          gh release create "$TAG" \
+            --title "XNU kernel iOS 16.7.16 for Xiaomi 17 Max (byron)" \
+            --notes "Target: Xiaomi 17 Max (byron), iOS 16.7.16 (20H392), xnu-8796 DEVELOPMENT/PANDORA. Upstream: OctoDevStudios/ios-popsicle." \
+            "$K" SHA256SUMS
+          echo "Release created: $TAG"

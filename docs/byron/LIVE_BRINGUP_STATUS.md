@@ -138,3 +138,46 @@ meson 在 macOS host 探测到 `HAVE_ENDIAN_H=1`，但实际用 iOS SDK 编译�
 5. `fastboot boot` → 内核安装器把插件装进 root → 抓日志确认 NativeAdrenoMetal.bundle 加载。
 
 全程约束：小米17 Max `byron`；不刷分区、不改 AVB、不做额外解锁。
+
+## fix15 白苹果卡点分析（2026-11-22，方向 A 结论）
+
+fix13/14/15 的 `exec xpcproxy` 每 10 s 循环**不是新阻塞**：紧跟其后的只有
+`bluetoothd` 与 `fairplayd.H2` 被 SIGKILL，属于 `sweetnoexec=bluetoothd,fairplayd.H2`
+基线的预期行为；3 次后还打印 `sweetcrashstop` 停止重启。GPU 链路也确认是活着的：
+`backboardd` client 0 经 AGXAccelerator 打开成功，`pipeline_libraries_made +33`、
+`pipelines_linked +17`，SWEET FB 实际 swap 多层且 `shown` 计数推进，渲染真实发生。
+白苹果的直接疑点收敛到两处：
+
+- `Failed to handle the new encryption key. Error 0xe00002d8`（34.030 s）。配套
+  `securityd sel 10 ... -> 0xe00002c7`（`kIOReturnUnsupported`，ProtectedCloudKeySyncing /
+  cdpd 钥匙串同步链路）。`0xe00002d8` = `kIOReturnNotReady`，同一错误码也出现在
+  `IONVRAMCHRPHandler.cpp:sync:894 - serializeVariables failed`，指向 NVRAM/keybag 写入失败。
+- `UMD_INIT: FAILED to Set Foreground ID + multiuser in commpage successfully`
+  （13.465 s）。`curFG:502, nextID:-1`、`BootedUser is:501`，会话表有 user 501 但取不到
+  next-session dict，退回 Loginwindow UID。此后始终没有 `exec loginwindow`。
+  该现象 fix13/14/15 完全一致，是稳定基线，不是 fix15 引入。
+
+### unified log 抓取链路：已修复工具，但数据侧不可用（重要）
+
+方向 A 原计划用 unified log 看 SpringBoard 侧详情，排查中发现两处历史缺陷并修复：
+
+1. `tools/ioslog_fetch.py` 的 `--parse` 写死调用
+   `/opt/work/macos-UnifiedLogs/examples/target/release/unifiedlog_iterator`，但该工具**从未安装**，
+   所以 fix11–fix15 每次抓取的解析步骤都静默失败，`ul_*.jsonl` 从未生成。本次已用 rsproxy
+   镜像装 Rust 1.88（apt 的 1.75 因 `edition=2024` 编不了），克隆
+   `mandiant/macos-UnifiedLogs` 并以 `cargo build --release -p unifiedlog_iterator` 编译成功。
+2. iOS 16 的 diagnostics 是「migrated」布局（UUID 文件名 + hex 桶），解析器只认传统
+   `Persist/*.tracev3`。新增 `tools/ul_adapt.py` 按 chunk tag 分类并硬链成标准布局。
+   可用（无实时数据入库）：
+   `python3 tools/ul_adapt.py la_fix15 la_fix15_std` → `unifiedlog_iterator -m log-archive -i la_fix15_std`。
+
+但**数据侧不可用**：按首 4 字节 magic 重新分类三个 archive，fix13/14/15 都只有
+~226 个 uuidtext（`0x66778899`）+ 2 dsc（`0x64736368`）+ 1 timesync（`0xbbb0`），
+**没有任何 tracev3**（顶层 chunk tag `0x1000`/`0x600b`/`0x600d`）。因此无论布局如何适配，
+解析结果都是 0 行。根因是 `ioslog_fetch.py` 的 `--minutes` 过滤按 HFS mtime 排除掉了
+tracev3，或 iOS 把本次启动的 trace 写在未纳入 root 镜像的卷上。要在 unified log 里继续，
+需先修抓取脚本的 tracev3 识别（按 magic 而非扩展名/时间过滤），这是独立任务。
+
+结论：方向 A 暂不能提供新证据，转方向 B——先攻 `0xe00002d8` 的 NVRAM/keybag 写入失败与
+`usermanagerd` 前台会话失败。两者可能是同一根因：系统卷 `rootrw=1` 下 NVRAM 持久化失败，
+导致 keybag 新 key 无法登记、user session 无法置为 foreground，loginwindow 因此不启动。

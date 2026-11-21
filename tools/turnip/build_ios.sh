@@ -15,7 +15,14 @@ mkdir -p "$OUT"; OUT=$(cd "$OUT" && pwd)
 SDK=$(xcrun --sdk iphoneos --show-sdk-path)
 CC=$(xcrun --sdk iphoneos --find clang); CXX=$(xcrun --sdk iphoneos --find clang++)
 AR=$(xcrun --sdk iphoneos --find ar); STRIP=$(xcrun --sdk iphoneos --find strip)
-FLAGS="['-target', 'arm64-apple-ios16.0', '-isysroot', '$SDK', '-fstack-protector-strong']"
+# Meson probes endian.h on the macOS host (HAVE_ENDIAN_H=1), but the actual compile targets the
+# iOS SDK, whose <endian.h> has no __BYTE_ORDER (Apple uses __DARWIN_BYTE_ORDER). That leaves
+# u_endian.h's UTIL_ARCH_* macros undefined, which also drops the endian-dependent
+# PIPE_FORMAT_RG88/GR88 aliases. arm64 is always little-endian, so define them explicitly.
+# The flex-generated ir3_lexer.c has no config.h/dlfcn.h include, so Dl_info/dladdr need the
+# header forced in. Apply compile-only flags here; link flags below stay untouched.
+BASE_FLAGS="['-target', 'arm64-apple-ios16.0', '-isysroot', '$SDK', '-fstack-protector-strong']"
+CC_FLAGS="['-target', 'arm64-apple-ios16.0', '-isysroot', '$SDK', '-fstack-protector-strong', '-include', 'dlfcn.h', '-DUTIL_ARCH_LITTLE_ENDIAN=1', '-DUTIL_ARCH_BIG_ENDIAN=0']"
 B=$OUT/build
 mkdir -p "$B"
 cat > "$B/ios.cross" <<EOF
@@ -34,12 +41,12 @@ endian = 'little'
 [properties]
 needs_exe_wrapper = true
 [built-in options]
-c_args = $FLAGS
-cpp_args = $FLAGS
-objc_args = $FLAGS
-c_link_args = $FLAGS
-cpp_link_args = $FLAGS
-objc_link_args = $FLAGS
+c_args = $CC_FLAGS
+cpp_args = $CC_FLAGS
+objc_args = $CC_FLAGS
+c_link_args = $BASE_FLAGS
+cpp_link_args = $BASE_FLAGS
+objc_link_args = $BASE_FLAGS
 EOF
 OPTIONS=(-Dgallium-drivers= -Dvulkan-drivers=freedreno -Dfreedreno-kmds=darwin "-Dtu-darwin-abi-dir=$ABI"
 	-Dplatforms=macos -Dglx=disabled -Degl=disabled -Dgbm=disabled -Dopengl=false -Dgles1=disabled

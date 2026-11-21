@@ -46,7 +46,7 @@
 
 1. 等 CI run `44920089727` 完成，用 `tools/byron_fetch_ci_kernel.py` 下载 `xnu-kernel` artifact 并核对 SHA256。
 2. 只替换内核重新打包 payload / loader；沿用 fix10 的 extents 和 boot args，不同时改用户态变量。
-3. `fastboot boot` 后回安卓，用 `tools/byron_capture.sh fix11 20` 抓内核环、unified log 和截图。
+3. `fastboot boot` 后回安卓，用 `bash tools/byron_capture.sh fix11 20` 抓内核环、unified log 和截图。
 4. 优先确认 `AGXAccelerator` 是否从 `none` 变成 `found`；再判断 `UMD_INIT` / `loginwindow` 是否仍是白苹果卡点。
 5. 若 AGX 已出现但仍卡 Logo，下一步专查登录会话链路；不要把 GPU 插件安装混进同一轮。
 

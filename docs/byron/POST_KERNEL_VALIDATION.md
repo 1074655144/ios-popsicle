@@ -52,7 +52,7 @@ fastboot boot shim/loader/wsl-out/loader-boot.img
 屏幕停下后，让用户长按电源回到 Android，确认 `sys.boot_completed=1`，然后：
 
 ```bash
-tools/byron_capture.sh fix11 20
+bash tools/byron_capture.sh fix11 20
 ```
 
 `summary.txt` 里重点看：

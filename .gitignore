@@ -50,3 +50,6 @@ tools/pinfile/pinwrite
 pandora_shot_*.png
 *.src*.img
 *.kbfix.img
+
+# unified-log parser runtime issues (device data)
+issues.jsonl

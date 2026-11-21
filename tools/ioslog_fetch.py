@@ -11,6 +11,12 @@ catalog and extents-overflow files, finds /private/var/db/diagnostics and /priva
   - uuidtext into a cache (/opt/work/ul_cache/uuidtext), only files not there yet or changed, then into la_NAME.
 With --parse it runs unifiedlog_iterator to $WSL_WORK/ul_NAME.jsonl. Device logs stay outside the repo.
 
+NOTE on mtime: iOS 16 writes tracev3 files with an UNSET mtime (left at the HFS epoch,
+~1970-01-01), while version.plist/.migrated carry a real wall-clock time. Filtering
+trace files against a `since` derived from the newest mtime therefore drops every
+real log as "too old". Trace files whose mtime is still in the 1970s are treated as
+fresh and always fetched.
+
 Environment overrides: ADB, IOS_IMG (phone-side root image), PINFILE (phone-side
 helper), WSL_ROOT (Windows UNC path to the WSL tree), WSL_DISTRO, WSL_WORK.
 """
@@ -198,10 +204,17 @@ def main():
         open(dst, 'wb').write(data)
         return True
 
+    # iOS 16 leaves tracev3 mtime unset (~HFS epoch = 1970). Such files are real
+    # logs from this boot; never drop them via the wall-clock `since` filter.
+    mtime_unset_cutoff = HFS_EPOCH + 60 * 60 * 24 * 365      # 1971-01-01
+    trace_n = skipped_old = 0
     for rel, v in files_under(diag):
         top = rel.split('/')[0]
-        if '/' in rel and top in ('Persist', 'Special', 'Signpost', 'HighVolume') and v[2] < since:
-            continue
+        if '/' in rel and top in ('Persist', 'Special', 'Signpost', 'HighVolume'):
+            trace_n += 1
+            if v[2] < since and v[2] >= mtime_unset_cutoff:
+                skipped_old += 1
+                continue
         if fetch(v, f'{la}/{rel}'):
             got += 1
         else:
@@ -219,7 +232,9 @@ def main():
         shutil.copyfile(dst, f'{la}/{rel}')
         nu += 1
     shutil.copyfile(f'{WSL}{WSL_WORK}/tools/ul_version.plist', f'{la}/version.plist')
-    print(f'diagnostics: {got} files (trace files since {time.strftime("%H:%M", time.gmtime(since - HFS_EPOCH))} UTC); '
+    print(f'diagnostics: {got} files ({trace_n} trace, {skipped_old} dropped as old); '
+          f'trace files since {time.strftime("%H:%M", time.gmtime(since - HFS_EPOCH))} UTC '
+          f'(mtime<1971 treated as fresh); '
           f'uuidtext: {nu} files, {nnew} new; {skipped} compressed skipped; '
           f'{r.calls} reads, {r.bytes >> 20} MiB, {time.time() - t0:.0f} s')
     if a.parse:

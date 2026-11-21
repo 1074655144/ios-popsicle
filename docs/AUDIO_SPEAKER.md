@@ -1,5 +1,11 @@
 # SM8850 的扬声器：让 iOS 16 的声音从喇叭出来
 
+> [!NOTE]
+> 本文档是**上游来源资料**：记录的是原项目在小米17 Pro（`pandora`）上打通扬声器的过程，
+> 功放型号、I2C 地址、GPIO、ACDB 取值均为 `pandora` 的实测数据，属于原项目。
+> 本仓库唯一适配目标是**小米17 Max（`byron`）**，来源见
+> [OctoDevStudios/ios-popsicle](https://github.com/OctoDevStudios/ios-popsicle)。byron 的同项参数要从其自身安卓读取。
+
 截至 2026-10-29，小米 17 Pro（pandora，骁龙 8 Elite Gen 5，SM8850）上的 iOS 16.7 能从两个喇叭放出系统声音和应用的声音。控制中心的音量条和实体音量键都能用，满音量和安卓一样响。没有声音时功放会下电，关机前也会先下电。
 
 这份文档写整条路是怎么做通的，给在同一颗 SoC 上做移植的人看。ADSP 启动、SMMU、共享内存和 AudioReach 播放图是 SoC 层面的，同 SoC 的机器可以照着做。功放型号、I2C 地址、GPIO 和 ACDB 里的取值是 pandora 的，换了机器要从自己手机的安卓里读。每一段写了代码在哪里、结论来自哪次测试。测试名（adsp3、spk20、aud19 这类）在 [PLAN.md](../PLAN.md) 里能查到当时的日志和判断。

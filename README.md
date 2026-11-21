@@ -13,9 +13,6 @@
 
 > [!IMPORTANT]
 > **本仓库适配的目标机型只有一个：小米17 Max（`byron`，SM8850-AC / 骁龙 8 Elite Gen 5）。**
-> 小米17 系列有多款不同后缀的型号（小米17、小米17 Pro、小米17 Pro Max、小米17 Max），
-> 本仓库**不是**其中任何其他型号的项目。文中出现的小米17 Pro Max（`popsicle`）仅指上游来源，
-> 不是本仓库的适配目标。
 
 > [!NOTE]
 > **来源 / Upstream**：本项目 fork 自 **[OctoDevStudios/ios-popsicle](https://github.com/OctoDevStudios/ios-popsicle)**，

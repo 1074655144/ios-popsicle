@@ -8,7 +8,9 @@
 # Clones use a mirror per command only (never a global url.insteadOf).
 set -euo pipefail
 MIRROR=https://ghfast.top/https://github.com/
-IPSW="/mnt/d/ipsw/iPhone10,3,iPhone10,6_16.7.16_20H392_Restore.ipsw"
+# Target iOS is the project-native 16.7.16 (20H392); see profiles/byron.env.
+# Override IPSW=... for a different build. Windows path: F:/i4Tools9/Firmware/...
+IPSW=${IPSW:-/mnt/f/i4Tools9/Firmware/iPhone10,3,iPhone10,6_16.7.16_20H392_Restore.ipsw}
 W=/opt/work
 log() { echo "== $(date +%T) $*"; }
 
@@ -43,7 +45,15 @@ command -v apfs-fuse
 
 log "ipsw images"
 mkdir -p $W/ipsw && cd $W/ipsw
-unzip -o -q "$IPSW" 087-86698-044.dmg 087-86593-047.dmg 087-86715-047.dmg \
-	Firmware/all_flash/DeviceTree.d22ap.im4p BuildManifest.plist
+# Derive build-specific names from THIS IPSW first (the tool reads BuildManifest.plist
+# straight out of the .ipsw zip, no extraction needed). Nothing is hard-coded per build.
+ASSETS=${IPSW_ASSETS:-/mnt/c/Users/qq107/WorkBuddy/2026-11-14-14-16-35/ios-popsicle/device/byron/ipsw_assets.env}
+python3 /mnt/c/Users/qq107/WorkBuddy/2026-11-14-14-16-35/ios-popsicle/tools/port/discover_ipsw_assets.py \
+	"$IPSW" -o "$ASSETS" 2>&1 | tail -5
+# shellcheck disable=SC1090
+. "$ASSETS"
+# CRYPTEX_DMGS now holds the real cryptex dmg names for this IPSW (e.g. iOS 16.5 / 20F66).
+# shellcheck disable=SC2086
+unzip -o -q "$IPSW" $CRYPTEX_DMGS Firmware/all_flash/DeviceTree.d22ap.im4p BuildManifest.plist
 ls -l $W/ipsw $W/ipsw/Firmware/all_flash
 log done

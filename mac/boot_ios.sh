@@ -5,16 +5,24 @@
 #
 #   mac/boot_ios.sh KERNEL SECONDS ["extra boot-args"] [--dry-run]
 #
+# IOS_DEVICE (default popsicle), IOS_EXTENTS_DIR, ADB_BIN, FASTBOOT_BIN let a new
+# board (e.g. byron) or tools/safe_boot.sh reuse this script. See docs/DSU_STYLE_SAFE_BOOT.md.
 # SECONDS: pandora_reboot_after, the kernel restarts the phone (back to Android) after that long.
 # Any time: hold Power + Volume down ~10 s to force the restart.
 set -euo pipefail
 KERNEL=${1:?kernel} SECS=${2:?seconds} EXTRA=${3:-} DRY=${4:-}
 M="$(cd "$(dirname "$0")" && pwd)"
+# Overridable for a new board (e.g. byron / Xiaomi 17 Max) and for mock-based tests.
+# Defaults keep the original popsicle behaviour unchanged.
+DEVICE=${IOS_DEVICE:-popsicle}
+EXDIR=${IOS_EXTENTS_DIR:-$M/extents}
+ADB_BIN=${ADB_BIN:-adb}
+FASTBOOT_BIN=${FASTBOOT_BIN:-fastboot}
 P=/data/local/tmp/pinfile ROOTF=/data/local/tmp/iosroot.img LOGF=/data/local/tmp/ioslog.img
-su() { adb shell "su -c '$*'" | tr -d '\r'; }
+su() { "$ADB_BIN" shell "su -c '$*'" | tr -d '\r'; }
 
 echo "== 1. phone (Android)"
-[ "$(adb shell getprop ro.product.device | tr -d '\r')" = popsicle ] || { echo "no popsicle on adb"; exit 1; }
+[ "$("$ADB_BIN" shell getprop ro.product.device | tr -d '\r')" = "$DEVICE" ] || { echo "no $DEVICE on adb"; exit 1; }
 for f in $ROOTF $LOGF; do
 	st=$(su "$P status $f"); echo "$st"
 	case $st in *": pinned (GC move failures 0)"*) ;; *) echo "refused: $f not pinned"; exit 1 ;; esac
@@ -22,8 +30,8 @@ done
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 su "$P extents $ROOTF --json" > "$T/iosroot.json"
 su "$P extents $LOGF --json" > "$T/ioslog.json"
-cmp -s "$T/iosroot.json" "$M/extents/iosroot.json" || { echo "refused: iosroot.img moved since phone_prepare.sh"; exit 1; }
-cmp -s "$T/ioslog.json" "$M/extents/ioslog.json" || { echo "refused: ioslog.img moved since phone_prepare.sh"; exit 1; }
+cmp -s "$T/iosroot.json" "$EXDIR/iosroot.json" || { echo "refused: iosroot.img moved since phone_prepare.sh"; exit 1; }
+cmp -s "$T/ioslog.json" "$EXDIR/ioslog.json" || { echo "refused: ioslog.img moved since phone_prepare.sh"; exit 1; }
 DEV=$(su "readlink -f /dev/block/by-name/userdata")
 off=$(/usr/bin/python3 -I -c "import json,sys; print(json.load(open(sys.argv[1]))['extents'][0][1])" "$T/iosroot.json")
 sig=$(su "dd if=$DEV bs=4096 skip=$((off / 4096)) count=1 2>/dev/null | dd bs=1 skip=1024 count=2 2>/dev/null")
@@ -32,7 +40,7 @@ echo "root file: pinned, unmoved, HFSX"
 args=""
 read -r rtc now <<< "$(su "cat /sys/class/rtc/rtc0/since_epoch; date +%s" | tr '\n' ' ')"
 case "$rtc$now" in *[!0-9]* | "") ;; *) args="$args pandora_rtc_offset=$((now - rtc))" ;; esac
-slot=$(adb shell getprop ro.boot.slot_suffix | tr -d '\r_')
+slot=$("$ADB_BIN" shell getprop ro.boot.slot_suffix | tr -d '\r_')
 case "$slot" in a | b) args="$args pandora_slot=$slot" ;; esac
 
 # GPU=1 (environment): the pinned GPU pack (mac/gpu_pack.sh + mac/gpu_phone.sh write), 1 GiB GPU pool,
@@ -42,7 +50,7 @@ if [ "${GPU:-0}" = 1 ]; then
 	FWF=/data/local/tmp/adspfw.img
 	case $(su "$P status $FWF") in *": pinned (GC move failures 0)"*) ;; *) echo "refused: $FWF not pinned"; exit 1 ;; esac
 	su "$P extents $FWF --json" > "$T/adspfw.json"
-	cmp -s "$T/adspfw.json" "$M/extents/adspfw.json" || { echo "refused: adspfw.img moved since gpu_phone.sh"; exit 1; }
+	cmp -s "$T/adspfw.json" "$EXDIR/adspfw.json" || { echo "refused: adspfw.img moved since gpu_phone.sh"; exit 1; }
 	export FWJ="$T/adspfw.json" GPUPOOL=1024 EXTRA_TC="$M/out-gpu/gpu.tc"
 	# The 17 Pro's last run (HANDOFF.md, post31): Metal frames scanned out directly (pandora_gpu_metal), CPU
 	# governor, board thermal limits (0333 ignores this board's open thermistors), gauge and battery, the sink for
@@ -67,10 +75,10 @@ bash "$M/build_boot.sh" "$KERNEL" "$T/iosroot.json" "$T/ioslog.json" "$BASE $GPU
 [ "$DRY" = --dry-run ] && { echo "dry run: not booting"; exit 0; }
 
 echo "== 3. fastboot boot (RAM only)"
-adb reboot bootloader
+"$ADB_BIN" reboot bootloader
 seen=0
-for _ in $(seq 1 30); do sleep 2; fastboot devices | grep -q fastboot && { seen=1; break; }; done
+for _ in $(seq 1 30); do sleep 2; "$FASTBOOT_BIN" devices | grep -q fastboot && { seen=1; break; }; done
 [ $seen = 1 ] || { echo "no fastboot device after 60 s: not booted"; exit 1; }
-[ "$(fastboot getvar product 2>&1 | sed -n 's/^product: //p' | tr -d '\r')" = popsicle ] || { echo "fastboot device is not popsicle"; exit 1; }
-fastboot boot "$M/out/loader-boot.img"
+[ "$("$FASTBOOT_BIN" getvar product 2>&1 | sed -n 's/^product: //p' | tr -d '\r')" = "$DEVICE" ] || { echo "fastboot device is not $DEVICE"; exit 1; }
+"$FASTBOOT_BIN" boot "$M/out/loader-boot.img"
 echo "booted at $(date +%H:%M:%S); back to Android after ${SECS}s (or hold Power + Volume down)"

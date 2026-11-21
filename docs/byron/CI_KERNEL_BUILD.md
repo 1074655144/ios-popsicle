@@ -7,7 +7,7 @@
 >
 > **不需要买苹果电脑。** 真正需要 macOS/Xcode 的编译步骤设计上就跑在 GitHub 云端 `macos-15` runner（原为 `macos-14`，已于 2026-11-02 退役）；本机（Windows + WSL）只负责触发、下载、组装。
 
-## 🔴 实际执行状态（2026-11-21 15:50）
+## ✅ 实际执行状态（2026-11-21 17:30：编译成功）
 
 - **已用用户提供的 PAT（fine-grained，账号 `1074655144`，admin 权限）通过 GitHub API 全程代办**，用户无需手动操作。
 - Fork 已建：`1074655144/ios-popsicle`（**public**，macOS runner 免费无时长上限）。URL: <https://github.com/1074655144/ios-popsicle>
@@ -19,11 +19,22 @@
   `cancel-in-progress` 仍然瞬间取消）、**不是**权限、也**不是** workflow 语法问题。
 - **已修复**：`.github/workflows/xnu.yml` 的 `runs-on` 由 `macos-14` 改为 **`macos-15`**（当前 arm64 镜像）。
 - 历史 run（均为旧 `macos-14`，全部 cancelled）：`44881039790` / `44881101899` / `44881225533` /
-  `44881739797` / `44881846665`。待新 `macos-15` 的 run 真正跑起来。
+  `44881739797` / `44881846665`。
+- **✅ 内核已发布到 Releases**：<https://github.com/1074655144/ios-popsicle/releases/tag/xnu-16.7.16-byron-20261121>
+  （tag `xnu-16.7.16-byron-20261121`，含 `kernel.development.pandora` 17.4MB + `SHA256SUMS`，永久保存、免登录直链）。
+  由 `release-kernel.yml` workflow 从 CI artifact 自动发布。
+- **✅ 编译成功：run `44885849346`（`macos-15`，约 10.5 分钟）全部 13 步 success**，runner_id=1000000017。
+  产物：`xnu-kernel` 62,781,131 B / `xnu-objects` 54,789,712 B / `xnu-buildtree` 23,959,099 B。
+  URL：<https://github.com/1074655144/ios-popsicle/actions/runs/44885849346>
+- **编译失败→修复完整链条（供复现）**：
+  1. `macos-14` 退役 → job 秒取消 → 改 `macos-15`（`xnu.yml` / `turnip.yml`）。
+  2. run `44882262020`：Build 1 分钟失败于 `0361-stage-nw-all.sh` 复制未入库的 `xnu/vendor/nw_all.o`
+     → 改为"缺 `nw_all.o` 时用 `xcrun clang` 生成 no-op `nw_wifi_*` 符号 stub"（Wi-Fi 默认关闭，仅满足链接）。
+  3. run `44882569858`：跑满 7.5 分钟后链接失败，缺 2 个符号 `nw_mhi_crash_report` /
+     `nw_wifi_control_transport_set`（来自 0363/0366 补丁 extern 声明）→ stub 补全。
+  4. run `44885849346`：✅ 全绿。Xcode 16 的 `iig` 未出问题，无需补 `IORPC.kernelContent`。
 - 监控 URL：<https://github.com/1074655144/ios-popsicle/actions>
-- **注意**：`macos-15` 默认 Xcode 16，其 `iig` 可能生成 xnu-8796 缺少的 `IORPC.kernelContent`。
-  若编译在此报错，需给 `struct IORPC` 补 `IORPCMessage * kernelContent` 字段（社区已验证的解法）。
-- **下一步**：新 run 跑完下载 `xnu-kernel` artifact → 解压出 `kernel.development.pandora` → 放到 `incoming/` → 本机组装。产物 retention 7 天。
+- **下一步**：下载 `xnu-kernel` artifact → SHA256 校验 → 放到 `incoming/` → 本机组装 payload → `fastboot boot` RAM 验证。产物 retention 7 天。
 
 ---
 
@@ -35,10 +46,10 @@
 | IPSW 资产解包（7GB）到 WSL `/opt/work/ipsw/` | ✅ 全部 SHA384 校验通过 |
 | `d22ap.adt` + `kernelcache.thin.macho` 转换 | ✅ 在 `/opt/work/ipsw/ext/` |
 | 本机 payload 工具链（adt.py/mkadt.py/mkpayload.py/mkadt_pandora.py/addtrustcache.py/bootlogo.py） | ✅ 已部署并用占位 kernel 端到端演练成功 |
-| **XNU kernel 编译** | ⬜ **唯一待办 —— 需你在 GitHub 触发云端 CI** |
-| payload 组装 + `fastboot boot` | ⬜ kernel 回来后本机可做 |
+| **XNU kernel 编译** | ✅ 云端 CI 已成功（run `44885849346`），`xnu-kernel` artifact 62MB 已产出 |
+| payload 组装 + `fastboot boot` | ⬜ kernel 下载 + 校验中，完成后本机可做 |
 
-**一句话**：本机这条链已经通了（用占位 kernel 生成过 49MB payload.bin 验证），现在就差一个真正编译出来的 kernel。
+**一句话**：kernel 已编译成功，本机组装链此前已用占位 kernel 端到端演练过（49MB payload.bin 验证），现在正在下载真 kernel，到位后即可组装 + RAM 启动验证。
 
 ---
 
@@ -78,7 +89,7 @@
 把 `kernel.development.pandora` 放到这个项目目录下：
 
 ```
-C:/Users/qq107/WorkBuddy/2026-11-14-14-16-35/ios-popsicle/incoming/kernel.development.pandora
+<repo>/incoming/kernel.development.pandora
 ```
 
 然后告诉我一声，我会依次完成：
@@ -102,11 +113,11 @@ KERNEL=<thin-macho> RD=ufsroot0 bash make_phone_payload.sh /opt/work/runTEST 'de
   → payload.bin  49 MB        ✅  (mkpayload 正确解析 __PRELINK_DATA/__LINKINFO/__LINKEDIT 段)
 ```
 
-工具链落点（都已就位）：
-- `/mnt/d/work/ios_pandora/ref/ios-sweet/tools/` ← adt.py / mkadt.py / mkpayload.py
-- `/mnt/d/work/ios_pandora/tools/` ← mkadt_pandora.py / addtrustcache.py / bootlogo.py
-- `/mnt/d/work/ios_pandora/wsl/make_phone_payload.sh`
-- `/opt/work/ipsw/` ← d22ap.adt / logo / 7GB 资产；`/opt/work/ipsw/ext/` ← 转换产物
+工具链落点（仓库内已就位）：
+- `tools/adt.py`、`tools/mkadt.py`、`tools/mkpayload.py`
+- `tools/mkadt_pandora.py`、`tools/addtrustcache.py`、`tools/bootlogo.py`
+- `wsl/make_phone_payload.sh`
+- `/opt/work/ipsw/` ← 本机 IPSW 解包资产（不入库）
 
 > 注：占位演练用的是 `rd=ufsroot0`（byron 的实际 root 路径，靠 pinned extents 指向 userdata 里的 iOS root），不依赖 `sweet-init` RAM disk。默认 `rd=md0` 才需要 `/opt/work/init/sweet-init`（本机无，但不影响 byron 路径）。
 

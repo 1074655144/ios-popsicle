@@ -37,3 +37,16 @@ mac/out-gpu/
 mac/extents/
 backup*/
 xnu/vendor/nw_all.o
+
+# Live, device-specific capture data: never commit. These are recreated on each phone.
+# The repo keeps the STEPS (docs/PHONE_DATA_CAPTURE.md), not the outputs.
+/incoming/
+/shim/loader/wsl-out/
+/shim/*/out/
+tools/pinfile/pinprobe
+tools/pinfile/pinwrite
+*.raw
+*.bgra
+pandora_shot_*.png
+*.src*.img
+*.kbfix.img

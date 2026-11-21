@@ -26,12 +26,14 @@
 | 文档 | 内容 |
 |---|---|
 | [CI_KERNEL_BUILD.md](CI_KERNEL_BUILD.md) | XNU kernel 云端编译（GitHub Actions）+ 本机组装 payload + RAM 启动 |
+| [LIVE_BRINGUP_STATUS.md](LIVE_BRINGUP_STATUS.md) | **当前真机启动进展**（fix5–fix8、日志结论、下一步） |
 | [PHASE_CLOSEOUT.md](PHASE_CLOSEOUT.md) | 阶段性封存报告、花屏根因结论、判断演变 |
 | [PORTING_GUIDE.md](PORTING_GUIDE.md) | 移植可行性与板级差异 |
 | [PORT_CHECKLIST.md](PORT_CHECKLIST.md) | 逐项参数清单 |
 | [FIRMWARE_PROVENANCE.md](FIRMWARE_PROVENANCE.md) | 官方 OTA / 字库备份取包存证 |
 | [FIRMWARE_DIFF.md](FIRMWARE_DIFF.md) | byron 相对 popsicle 的固件 diff |
 | [WHAT_TO_COLLECT.md](WHAT_TO_COLLECT.md) | 需要从手机采集什么 |
+| [../PHONE_DATA_CAPTURE.md](../PHONE_DATA_CAPTURE.md) | 可复用的采集/镜像/日志/截图步骤（不提交采集产物） |
 | [FB_VERIFY_GUIDE.md](FB_VERIFY_GUIDE.md) | framebuffer 参数肉眼验证（stride 4800 定稿） |
 | [FBFLIP_GUIDE.md](FBFLIP_GUIDE.md) | 显示链路红蓝翻转定性验证 |
 | [UBWC_OFF_GUIDE.md](UBWC_OFF_GUIDE.md) | 关 UBWC 诊断（已封存） |

@@ -6,8 +6,14 @@
  * fixups already resolved, ADT, optional RAM disk) is embedded in this image.
  * Like ios-sweet's shim/loader.c: copy segments to phys_base + (vmaddr - virt_base),
  * place the ADT and boot_args behind the kernel, jump to the entry with the MMU and
- * caches off and x0 = boot_args (physical). Framebuffer values were measured on this
- * phone by shim/hello (0xfc800000, 1200x2608, stride 4800 on popsicle, ARGB8888, self-refreshing).
+ * caches off and x0 = boot_args (physical). Framebuffer base/size come from the live FDT
+ * cont_splash_region (0xfc800000, 0x2b00000). Linear splash FB parameters were proven by
+ * shim/stridescan on real HW (2026-11-21): 1200x2608, stride 4800 (=1200*4), i.e. popsicle's
+ * original pitch. The 1216x2608 / 4864 values from live DRM debugfs (fb370) belong to the
+ * Android-runtime UBWC framebuffer (modifier=0x500000000000001), NOT the linear splash FB we
+ * write in fastboot; using 4864 caused the skew/checker corruption. NOTE: byron DRM format is
+ * AB24/BGRA8888 (0x34324241); color word semantics below still ARGB (0xAARRGGBB) pending
+ * byte-order confirmation.
  *
  * MMU is off: every access is Device memory (-mstrict-align, 8-byte copies).
  * Linked at 0 and loaded anywhere: no absolute pointers in data.
@@ -21,11 +27,11 @@
 
 void fatal(void) __attribute__((noreturn));
 
-#define FB          0xfc800000ull
-#define FB_SIZE     0x2b00000ull
-#define FB_W        1200u
+#define FB          0xfc800000ull   /* byron live FDT: cont_splash_region reg */
+#define FB_SIZE     0x2b00000ull   /* byron live FDT: cont_splash_region size */
+#define FB_W        1200u          /* stridescan 实证: 线性 splash FB 1200 (popsicle 原值) */
 #define FB_H        2608u
-#define FB_STRIDE   (1200u * 4)
+#define FB_STRIDE   (1200u * 4)    /* = 4800, stridescan band0 实证; 4864 是 UBWC fb370 错误值 */
 /* Kernel RAM must stay inside the clean 0x8c0000000 + 9 GiB range (popsicle live FDT: /memory
  * 0x8c0000000+3G and 0x980000000+6G, no fixed reserved-memory inside; pandora had 13 GiB). */
 #define RAM_LO      0x8c0000000ull

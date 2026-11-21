@@ -1,12 +1,11 @@
 /*
- * pandora-hello: first program for the Xiaomi 17 Pro (pandora, SM8850).
- * Started by `fastboot boot`, writes nothing to storage. It finds the framebuffer ABL
- * left on screen, prints CPU facts (exception level, 16K page support, PAC, ...), the
- * display pipe registers and its own load address, counts down 120 s and resets the
- * phone back to Android with PSCI SYSTEM_RESET.
+ * pandora-hello: byron (Xiaomi 17 Max, SM8850-AC) 引导阶段只读探测.
+ * 大字精简版: 只探测并大字显示 6 项引导期参数, 300 秒后 PSCI SYSTEM_RESET
+ * 回到安卓. `fastboot boot` 启动, 不写任何存储; 长按电源键可随时强制重启.
  *
- * MMU is off: every access is Device memory, so the code is built with -mstrict-align.
- * The image is linked at 0 and loaded anywhere: no absolute pointers in data.
+ * 显示 6 项: 16K 页支持 / 装载地址 / FB 基址 / 宽高 / stride / fmt.
+ * MMU 关闭, 所有访问均为 Device memory, 以 -mstrict-align 编译.
+ * Image 链接于 0 且可加载到任意位置: 数据中无绝对指针.
  */
 #include <stdint.h>
 #include "font.h"
@@ -17,8 +16,7 @@ extern uint64_t fault_esr;
 
 #define SYSREG(r) ({ uint64_t v_; __asm__ volatile("mrs %0, " #r : "=r"(v_)); v_; })
 
-/* Display: MDP block and pipe offsets from the live DT (qcom,mdss_mdp@9800000,
- * qcom,sde-sspp-off); splash region from /reserved-memory/splash_region. */
+/* 与 byron 真机 FDT / 固件一致: qcom,mdss_mdp@9800000, splash_region. */
 #define MDP          0x9800000ull
 #define SPLASH       0xfc800000ull
 #define SPLASH_SIZE  0x2b00000ull
@@ -30,10 +28,11 @@ struct pipe { uint32_t size, addr, stride, fmt, faulted; };
 static struct pipe pipes[10];
 
 static volatile uint32_t *fb;
-static uint32_t fb_w, fb_h, fb_stride;   /* stride in bytes */
+static uint32_t fb_w, fb_h, fb_stride, fb_fmt;   /* stride 单位: 字节 */
 static int row;
 
-#define SCALE 3
+/* 超大字体: 每字符 64x128 像素, 一屏 1200 宽可容纳约 18 字符. */
+#define SCALE 8
 #define CW    (8 * SCALE)
 #define CH    (16 * SCALE)
 #define MARGIN 24
@@ -103,26 +102,11 @@ static char *cat(char *p, const char *s)
 	return p;
 }
 
-/* "LABEL     text" in two colours, then next row. */
-static void line(const char *label, const char *text, uint32_t fg)
+/* 整行一个字符串, 从最左列开始, 写完换下一行. */
+static void row_text(const char *s, uint32_t fg)
 {
-	put_str(0, label, YELLOW);
-	put_str(10, text, fg);
+	put_str(0, s, fg);
 	row++;
-}
-
-static void hexline(const char *label, uint64_t v)
-{
-	char b[24];
-	hex(cat(b, "0x"), v, 16);
-	line(label, b, WHITE);
-}
-
-static const char *gran(uint64_t f, int is4or64)
-{
-	if (is4or64)                     /* TGran4 / TGran64: 0 = yes, 0xf = no */
-		return f == 0xf ? "NO" : (f == 1 ? "YES(52bit)" : "YES");
-	return f == 0 ? "NO" : (f == 2 ? "YES(52bit)" : "YES");   /* TGran16 */
 }
 
 static void find_framebuffer(void)
@@ -139,19 +123,19 @@ static void find_framebuffer(void)
 		if (!any && pick < 0 && pipes[i].addr >= SPLASH && pipes[i].addr < SPLASH + SPLASH_SIZE)
 			pick = i;
 	}
-	/* Default guess when no pipe scans out of the splash region. */
+	/* 无可用管道时的兜底: popsicle 占位值, 仅用于显示, 不影响探测. */
 	uint64_t base = SPLASH;
-	fb_w = 1220; fb_h = 2656; fb_stride = 1220 * 4;
+	fb_w = 1220; fb_h = 2656; fb_stride = 1220 * 4; fb_fmt = 0;
 	if (pick >= 0) {
 		uint32_t w = pipes[pick].size & 0xffff, h = pipes[pick].size >> 16;
 		uint32_t s = pipes[pick].stride & 0xffff;
 		if (w >= 64 && w <= 4096 && h >= 64 && h <= 4096 && s >= w * 4 &&
 		    pipes[pick].addr + (uint64_t)s * h <= SPLASH + SPLASH_SIZE) {
 			base = pipes[pick].addr;
-			fb_w = w; fb_h = h; fb_stride = s;
+			fb_w = w; fb_h = h; fb_stride = s; fb_fmt = pipes[pick].fmt;
 		}
 	}
-	/* Never write outside the splash reservation. */
+	/* 写屏永不越出 splash 保留区. */
 	if (base + (uint64_t)fb_stride * fb_h > SPLASH + SPLASH_SIZE)
 		fb_h = (uint32_t)((SPLASH + SPLASH_SIZE - base) / fb_stride);
 	fb = (volatile uint32_t *)(uintptr_t)base;
@@ -165,96 +149,103 @@ static void psci_reset(void)
 	fatal();
 }
 
+/* 把探测结果写成 ASCII, 放进 ramoops console 区尾部 (0xff400000..0xff500000).
+ * reset 后安卓内核的 pstore 把它导出到 /sys/fs/pstore/console-ramoops-0, 直接读.
+ * 用醒目标记行包裹, 便于从内核日志中 grep. */
+#define RAMOOPS_CONSOLE_BASE 0xff400000ull
+#define RAMOOPS_CONSOLE_SIZE 0x100000ull
+static void putc_dump(volatile unsigned char **pp, char c) { *(*pp)++ = (unsigned char)c; }
+static void puts_dump(volatile unsigned char **pp, const char *s)
+{ while (*s) putc_dump(pp, *s++); }
+static void hex8_dump(volatile unsigned char **pp, uint64_t v)
+{
+	static const char hx[] = "0123456789ABCDEF";
+	putc_dump(pp, '0'); putc_dump(pp, 'x');
+	for (int i = 7; i >= 0; i--) putc_dump(pp, hx[(v >> (i * 4)) & 0xf]);
+}
+static void dec_dump(volatile unsigned char **pp, uint64_t v)
+{
+	char t[24]; int n = 0;
+	do t[n++] = '0' + v % 10; while (v /= 10);
+	while (n) putc_dump(pp, t[--n]);
+}
+static void write_dump(uint64_t el, uint64_t load, uint64_t mmfr0)
+{
+	/* 写在 console 区末尾 2KB, 避开内核新日志的循环写入方向.
+	 * 用 movz/movk 构造地址, 避免 64 位常量进入 rodata 产生 ABS64 重定位
+	 * (Image 会被加载到任意地址, 绝对地址会失效). */
+	uint64_t dump_pa;
+	__asm__ volatile("movz %0, #0xf800\n\tmovk %0, #0xff4f, lsl #16"
+	                 : "=r"(dump_pa));   /* 0xff4ff800 */
+	volatile unsigned char *p = (volatile unsigned char *)(uintptr_t)dump_pa;
+	int has16k = ((mmfr0 >> 20) & 0xf) != 0;
+	puts_dump(&p, "\n===BYRON_PROBE_BEGIN===\n");
+	puts_dump(&p, "MAGIC=BYRDPROBE1\n");
+	puts_dump(&p, "EL="); dec_dump(&p, el); putc_dump(&p, '\n');
+	puts_dump(&p, "LOAD="); hex8_dump(&p, load); putc_dump(&p, '\n');
+	puts_dump(&p, "MMFR0="); hex8_dump(&p, mmfr0); putc_dump(&p, '\n');
+	puts_dump(&p, "PAGES16K="); puts_dump(&p, has16k ? "YES" : "NO"); putc_dump(&p, '\n');
+	puts_dump(&p, "FB="); hex8_dump(&p, (uint64_t)(uintptr_t)fb); putc_dump(&p, '\n');
+	puts_dump(&p, "W="); dec_dump(&p, fb_w);
+	puts_dump(&p, " H="); dec_dump(&p, fb_h); putc_dump(&p, '\n');
+	puts_dump(&p, "STRIDE="); dec_dump(&p, fb_stride); putc_dump(&p, '\n');
+	puts_dump(&p, "FMT="); hex8_dump(&p, fb_fmt); putc_dump(&p, '\n');
+	for (int i = 0; i < 10; i++) {
+		puts_dump(&p, "P"); dec_dump(&p, i);
+		puts_dump(&p, "="); hex8_dump(&p, pipes[i].addr);
+		puts_dump(&p, ","); hex8_dump(&p, pipes[i].stride);
+		puts_dump(&p, ","); hex8_dump(&p, pipes[i].size);
+		puts_dump(&p, ","); hex8_dump(&p, pipes[i].fmt);
+		putc_dump(&p, '\n');
+	}
+	puts_dump(&p, "===BYRON_PROBE_END===\n");
+	__asm__ volatile("dsb sy" ::: "memory");
+}
+
 void hello_main(uint64_t fdt, uint64_t el, uint64_t load)
 {
+	(void)fdt;
 	find_framebuffer();
+	uint64_t mmfr0 = SYSREG(id_aa64mmfr0_el1);
+	write_dump(el, load, mmfr0);
 	fill(0, 0, fb_w, fb_h, BG);
 	row = 0;
 	char b[64], *p;
 
-	line("PANDORA", "hello v1 - nothing is written to storage", GREEN);
-	row++;
-	p = dec(cat(b, "EL"), el);
-	line("LEVEL", b, el == 1 ? WHITE : RED);
-	hexline("LOADED", load);
-	uint32_t f = 0;
-	uint32_t magic = fdt ? safe_rd32(fdt, &f) : 0;
-	p = hex(cat(b, "0x"), fdt, 12);
-	p = cat(p, magic == 0xedfe0dd0u ? " FDT ok" : " NO FDT");
-	line("DTB", b, magic == 0xedfe0dd0u ? WHITE : RED);
-	row++;
+	row_text("BYRON PROBE V2", YELLOW);
 
-	hexline("MIDR", SYSREG(midr_el1));
-	hexline("MPIDR", SYSREG(mpidr_el1));
-	uint64_t mmfr0 = SYSREG(id_aa64mmfr0_el1);
-	hexline("MMFR0", mmfr0);
-	p = cat(b, "16K ");
-	p = cat(p, gran((mmfr0 >> 20) & 0xf, 0));
-	p = cat(p, "  4K ");
-	p = cat(p, gran((mmfr0 >> 28) & 0xf, 1));
-	p = cat(p, "  64K ");
-	p = cat(p, gran((mmfr0 >> 24) & 0xf, 1));
-	line("PAGES", b, ((mmfr0 >> 20) & 0xf) ? GREEN : RED);
-	static const uint8_t pa_bits[8] = {32, 36, 40, 42, 44, 48, 52, 56};
-	p = dec(cat(b, "PA "), pa_bits[mmfr0 & 7]);
-	cat(p, " bits");
-	line("", b, WHITE);
-	hexline("MMFR1", SYSREG(id_aa64mmfr1_el1));
-	hexline("MMFR2", SYSREG(s3_0_c0_c7_2));
-	hexline("PFR0", SYSREG(id_aa64pfr0_el1));
-	hexline("PFR1", SYSREG(id_aa64pfr1_el1));
-	hexline("ISAR0", SYSREG(id_aa64isar0_el1));
-	uint64_t isar1 = SYSREG(id_aa64isar1_el1);
-	hexline("ISAR1", isar1);
-	hexline("ISAR2", SYSREG(s3_0_c0_c6_2));
+	/* TGran16 != 0 即支持 16K 页 (ID_AA64MMFR0_EL1.TGran16, bits 23:20). */
+	int has16k = ((mmfr0 >> 20) & 0xf) != 0;
+	row_text(has16k ? "16K PAGE YES" : "16K PAGE NO", has16k ? GREEN : RED);
+
+	p = hex(cat(b, "LOAD 0x"), load, 8);
+	row_text(b, WHITE);
+
+	p = hex(cat(b, "FB 0x"), (uint64_t)(uintptr_t)fb, 8);
+	row_text(b, WHITE);
+
+	p = dec(cat(b, "W "), fb_w);
+	p = cat(p, " H ");
+	p = dec(p, fb_h);
+	row_text(b, WHITE);
+
+	p = dec(cat(b, "STRIDE "), fb_stride);
+	row_text(b, WHITE);
+
+	p = hex(cat(b, "FMT 0x"), fb_fmt, 8);
+	row_text(b, WHITE);
+
+	/* 结果已写入保留内存; 短暂停留后重启, 回安卓从 /dev/mem 读回. */
 	uint64_t frq = SYSREG(cntfrq_el0);
-	p = dec(cat(b, ""), frq);
-	cat(p, " Hz");
-	line("CNTFRQ", b, WHITE);
-	hexline("SCTLR1", SYSREG(sctlr_el1));
-	row++;
-
-	p = hex(cat(b, "0x"), (uintptr_t)fb, 10);
-	p = dec(cat(p, " "), fb_w);
-	p = dec(cat(p, "x"), fb_h);
-	p = dec(cat(p, " stride "), fb_stride);
-	line("FB", b, WHITE);
-	for (int i = 0; i < 10; i++) {
-		if (pipes[i].faulted) {
-			p = cat(b, "read fault esr ");
-			hex(p, fault_esr, 8);
-		} else {
-			p = hex(b, pipes[i].addr, 8);
-			p = hex(cat(p, " "), pipes[i].stride, 8);
-			p = hex(cat(p, " "), pipes[i].size, 8);
-			hex(cat(p, " "), pipes[i].fmt, 8);
-		}
-		char lab[8];
-		cat(dec(cat(lab, i < 4 ? "VIG" : "DMA"), i < 4 ? i : i - 4), "");
-		line(lab, b, WHITE);
-	}
-	row++;
-
-	/* Colour bars: tell the pixel format apart by eye. */
-	uint32_t y = MARGIN + row * CH, w = (fb_w - 2 * MARGIN) / 4;
-	fill(MARGIN, y, w, CH, 0xffff0000u);
-	fill(MARGIN + w, y, w, CH, 0xff00ff00u);
-	fill(MARGIN + 2 * w, y, w, CH, 0xff0000ffu);
-	fill(MARGIN + 3 * w, y, w, CH, 0xffffffffu);
-	row++;
-	line("BARS", "should read: red green blue white", WHITE);
-	row++;
-
-	/* Countdown: if it keeps changing, the panel refreshes by itself. */
 	uint64_t t0 = SYSREG(cntvct_el0);
 	int crow = row;
-	for (uint64_t s = 120; s > 0; s--) {
+	for (uint64_t s = 12; s > 0; s--) {
 		row = crow;
 		fill(MARGIN, MARGIN + row * CH, fb_w - 2 * MARGIN, CH, BG);
-		p = dec(cat(b, "reboot to Android in "), s);
-		cat(p, " s");
-		line("TIMER", b, GREEN);
-		while (SYSREG(cntvct_el0) - t0 < (120 - s + 1) * frq)
+		p = dec(cat(b, "REBOOT IN "), s);
+		cat(p, " S");
+		row_text(b, GREEN);
+		while (SYSREG(cntvct_el0) - t0 < (12 - s + 1) * frq)
 			;
 	}
 	psci_reset();

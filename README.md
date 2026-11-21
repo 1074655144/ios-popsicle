@@ -30,7 +30,9 @@ Normal testing writes nothing to the phone's partitions. The kernel starts with 
 
 ## Status
 
-Percentages are the **original author's** estimates for the Xiaomi 17 Pro Max (`popsicle`), the upstream target. They are not measurements, and **do not reflect the Xiaomi 17 Max (`byron`)** this fork targets — byron bring-up is at an earlier stage; see **[docs/byron/PHASE_CLOSEOUT.md](docs/byron/PHASE_CLOSEOUT.md)**.
+Percentages are the **original author's** estimates for the Xiaomi 17 Pro Max (`popsicle`), the upstream target. They are not measurements, and **do not reflect the Xiaomi 17 Max (`byron`)** this fork targets — byron bring-up is at an earlier stage; see **[docs/byron/LIVE_BRINGUP_STATUS.md](docs/byron/LIVE_BRINGUP_STATUS.md)** for the current RAM-boot progress and **[docs/byron/PHASE_CLOSEOUT.md](docs/byron/PHASE_CLOSEOUT.md)** for the earlier phase closeout.
+
+Reusable per-phone capture/build/log steps are in **[docs/PHONE_DATA_CAPTURE.md](docs/PHONE_DATA_CAPTURE.md)**. Real-time phone data (extents, logs, screenshots, images) is intentionally not committed.
 
 **Legend:** 🟢 works · 🟡 partly works · 🟠 in progress · ⚪ not started
 

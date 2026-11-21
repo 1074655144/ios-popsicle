@@ -9,7 +9,10 @@ catalog and extents-overflow files, finds /private/var/db/diagnostics and /priva
   - the trace files of Persist, Special, Signpost and HighVolume changed in the last MINUTES (the test boot), all of
     timesync and the top-level files, into /opt/work/la_NAME (WSL);
   - uuidtext into a cache (/opt/work/ul_cache/uuidtext), only files not there yet or changed, then into la_NAME.
-With --parse it runs unifiedlog_iterator to /opt/work/ul_NAME.jsonl. Device logs: they stay outside the repo.
+With --parse it runs unifiedlog_iterator to $WSL_WORK/ul_NAME.jsonl. Device logs stay outside the repo.
+
+Environment overrides: ADB, IOS_IMG (phone-side root image), PINFILE (phone-side
+helper), WSL_ROOT (Windows UNC path to the WSL tree), WSL_DISTRO, WSL_WORK.
 """
 import argparse
 import os
@@ -20,8 +23,11 @@ import sys
 import time
 
 ADB = os.environ.get('ADB', 'adb')
-IMG = '/data/local/tmp/iosroot.img'
-WSL = '//wsl$/Ubuntu-24.04'
+IMG = os.environ.get('IOS_IMG', '/data/local/tmp/iosroot.img')
+PINFILE = os.environ.get('PINFILE', '/data/local/tmp/pinfile')
+WSL = os.environ.get('WSL_ROOT', '//wsl$/Ubuntu-24.04')
+WSL_DISTRO = os.environ.get('WSL_DISTRO', 'Ubuntu-24.04')
+WSL_WORK = os.environ.get('WSL_WORK', '/opt/work')
 BLK = 4096
 HFS_EPOCH = 2082844800            # seconds from 1904-01-01 to 1970-01-01
 
@@ -42,7 +48,7 @@ class Remote:
         a = off - off % BLK
         b = off + length
         b += (-b) % BLK
-        cmd = f"su -c '/data/local/tmp/pinfile rawreadat {IMG} {self.dev} {a} {b - a} 2>/dev/null'"
+        cmd = f"su -c '{PINFILE} rawreadat {IMG} {self.dev} {a} {b - a} 2>/dev/null'"
         data = subprocess.run([ADB, 'exec-out', cmd], capture_output=True,
                               env=dict(os.environ, MSYS_NO_PATHCONV='1')).stdout
         self.calls += 1
@@ -177,8 +183,8 @@ def main():
     uuid = lookup('private/var/db/uuidtext')
     newest = max(v[2] for _, v in files_under(diag))
     since = newest - 60 * a.minutes
-    la = f'{WSL}/opt/work/la_{a.name}'
-    cache = f'{WSL}/opt/work/ul_cache/uuidtext'
+    la = f'{WSL}{WSL_WORK}/la_{a.name}'
+    cache = f'{WSL}{WSL_WORK}/ul_cache/uuidtext'
     shutil.rmtree(la, ignore_errors=True)
     os.makedirs(la)
     got = skipped = 0
@@ -212,15 +218,16 @@ def main():
         os.makedirs(os.path.dirname(f'{la}/{rel}'), exist_ok=True)
         shutil.copyfile(dst, f'{la}/{rel}')
         nu += 1
-    shutil.copyfile(f'{WSL}/opt/work/tools/ul_version.plist', f'{la}/version.plist')
+    shutil.copyfile(f'{WSL}{WSL_WORK}/tools/ul_version.plist', f'{la}/version.plist')
     print(f'diagnostics: {got} files (trace files since {time.strftime("%H:%M", time.gmtime(since - HFS_EPOCH))} UTC); '
           f'uuidtext: {nu} files, {nnew} new; {skipped} compressed skipped; '
           f'{r.calls} reads, {r.bytes >> 20} MiB, {time.time() - t0:.0f} s')
     if a.parse:
-        cmd = (f'/opt/work/macos-UnifiedLogs/examples/target/release/unifiedlog_iterator -m log-archive '
-               f'-i /opt/work/la_{a.name} -o /opt/work/ul_{a.name}.jsonl -f jsonl > /tmp/ulit_{a.name}.log 2>&1; '
-               f'ls -la /opt/work/ul_{a.name}.jsonl')
-        subprocess.run(['wsl', '-d', 'Ubuntu-24.04', '-u', 'root', '-e', 'bash', '-c', cmd])
+        cmd = (f'{WSL_WORK}/macos-UnifiedLogs/examples/target/release/unifiedlog_iterator -m log-archive '
+               f'-i {WSL_WORK}/la_{a.name} -o {WSL_WORK}/ul_{a.name}.jsonl -f jsonl '
+               f'> /tmp/ulit_{a.name}.log 2>&1; '
+               f'ls -la {WSL_WORK}/ul_{a.name}.jsonl')
+        subprocess.run(['wsl', '-d', WSL_DISTRO, '-u', 'root', '-e', 'bash', '-c', cmd])
 
 
 if __name__ == '__main__':

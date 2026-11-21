@@ -10,7 +10,7 @@ on:
         description: RELEASE / DEVELOPMENT / DEBUG
         default: DEVELOPMENT
       machine_config:
-        description: xnu MACHINE_CONFIG (PANDORA = Xiaomi 17 Pro, 4 KiB pages; FUXI / SWEET also build)
+        description: xnu MACHINE_CONFIG (PANDORA = 4 KiB-page upstream config, target device Xiaomi 17 Max / byron; FUXI / SWEET also build)
         default: PANDORA
       keep_going:
         description: make -k (collect all compile errors in one run)
@@ -30,9 +30,11 @@ env:
 
 jobs:
   build:
-    # macos-14 still ships Xcode 15.x: its iig matches the xnu-8796 IORPC ABI
-    # (Xcode 16's iig emits IORPC.kernelContent, which this xnu lacks)
-    runs-on: macos-14
+    # macos-14 was retired by GitHub on 2026-11-02 ("macos-14-arm64-us-default
+    # is not supported"), so jobs were cancelled before a runner was assigned.
+    # macos-15 is the current arm64 image; its Xcode 16 may emit IORPC.kernelContent
+    # that xnu-8796 lacks - if the build fails there, add a patch to struct IORPC.
+    runs-on: macos-15
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4

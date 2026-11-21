@@ -1,28 +1,39 @@
 <div align="center">
 
-# iOS on the Xiaomi 17 Pro Max
+# iOS on the Xiaomi 17 Max（小米17 Max）
 
 **iOS 16.7.16 running natively on Snapdragon 8 Elite Gen 5 hardware, booted from RAM.**
 
-![Device](https://img.shields.io/badge/device-popsicle-111111?style=for-the-badge)
+![Device](https://img.shields.io/badge/device-byron-111111?style=for-the-badge)
 ![SoC](https://img.shields.io/badge/SoC-SM8850-3253DC?style=for-the-badge)
 ![Kernel](https://img.shields.io/badge/kernel-xnu--8796-555555?style=for-the-badge)
 ![Status](https://img.shields.io/badge/status-experimental-E5A00D?style=for-the-badge)
 
 </div>
 
+> [!IMPORTANT]
+> **本仓库适配的目标机型只有一个：小米17 Max（`byron`，SM8850-AC / 骁龙 8 Elite Gen 5）。**
+> 小米17 系列有多款不同后缀的型号（小米17、小米17 Pro、小米17 Pro Max、小米17 Max），
+> 本仓库**不是**其中任何其他型号的项目。文中出现的小米17 Pro Max（`popsicle`）仅指上游来源，
+> 不是本仓库的适配目标。
+
+> [!NOTE]
+> **来源 / Upstream**：本项目 fork 自 **[OctoDevStudios/ios-popsicle](https://github.com/OctoDevStudios/ios-popsicle)**，
+> 原项目适配的是小米17 Pro Max（`popsicle`）。本 fork 在其基础上改适配到小米17 Max（`byron`）。
+> 完整致谢见下方 [Credits](#credits)。
+
 > [!WARNING]
 > Research project, not a daily driver. You can lose data or damage your phone, and you are responsible for what you run. Back up everything first.
 
 ## What this is
 
-A self-built XNU kernel with native drivers for the Xiaomi 17 Pro Max, running the unmodified userland of an iPhone X. There is no emulator and no virtual machine: iOS talks to the hardware through drivers compiled into the kernel.
+A self-built XNU kernel with native drivers for the **Xiaomi 17 Max (`byron`)**, running the unmodified userland of an iPhone X. There is no emulator and no virtual machine: iOS talks to the hardware through drivers compiled into the kernel.
 
 Normal testing writes nothing to the phone's partitions. The kernel starts with `fastboot boot`, lives in RAM, and a restart returns to Android.
 
 ## Status
 
-Percentages are the author's estimates of how far each part is from working as it does under Android. They are not measurements.
+Percentages are the **original author's** estimates for the Xiaomi 17 Pro Max (`popsicle`), the upstream target. They are not measurements, and **do not reflect the Xiaomi 17 Max (`byron`)** this fork targets — byron bring-up is at an earlier stage; see **[docs/byron/PHASE_CLOSEOUT.md](docs/byron/PHASE_CLOSEOUT.md)**.
 
 **Legend:** 🟢 works · 🟡 partly works · 🟠 in progress · ⚪ not started
 
@@ -68,7 +79,7 @@ Percentages are the author's estimates of how far each part is from working as i
 
 Nothing here is a ready-to-flash image. You build the kernel and the root filesystem yourself, from your own files. See **[BUILDING.md](BUILDING.md)**.
 
-You need a Xiaomi 17 Pro Max with an unlocked bootloader and root, a Mac, and your own IPSW for the iPhone X.
+You need a **Xiaomi 17 Max (`byron`)** with an unlocked bootloader and root, a Mac (or a GitHub Actions fork — see **[docs/byron/CI_KERNEL_BUILD.md](docs/byron/CI_KERNEL_BUILD.md)**), and your own iPhone X IPSW.
 
 ## What's in the repo
 
@@ -94,7 +105,8 @@ Firmware is read from your own phone at run time, and modem writes never leave R
 
 Built on the work of others:
 
-- **[Data A Live](https://github.com/ShueiTsuki/data-a-live)** by ShueiTsuki: the Xiaomi 17 Pro port this project continues. Kernel drivers, GPU work and most of the tooling come from it.
+- **[OctoDevStudios/ios-popsicle](https://github.com/OctoDevStudios/ios-popsicle)** — **本仓库的直接上游 / the repository this fork is based on**. 原仓库适配 Xiaomi 17 Pro Max (`popsicle`)；本 fork 改适配 Xiaomi 17 Max (`byron`).
+- **[Data A Live](https://github.com/ShueiTsuki/data-a-live)** by ShueiTsuki: the Xiaomi 17 Pro port the upstream project continues. Kernel drivers, GPU work and most of the tooling come from it.
 - **[ios-sweet](https://github.com/dipa-studio/ios-sweet)** and **[ios-fuxi](https://github.com/bangprovn/ios-fuxi)**: the approach and the early kernel patches.
 - **[UniXNU](https://github.com/UniXNU/UniXNU)**: 4K-page kernel, storage driver, NativeAdreno, NativeMetal, ArmSmmu4K, Ath12kWifi and Qualcomm components.
 - **[Mesa](https://gitlab.freedesktop.org/mesa/mesa)** (Turnip) and **[metal2vulkan](https://github.com/steelbrain/metal2vulkan)**.

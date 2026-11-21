@@ -22,12 +22,25 @@ AR=$(xcrun --sdk iphoneos --find ar); STRIP=$(xcrun --sdk iphoneos --find strip)
 # The flex-generated ir3_lexer.c has no config.h/dlfcn.h include, so Dl_info/dladdr need the
 # header forced in. Apply compile-only flags here; link flags below stay untouched.
 BASE_FLAGS="['-target', 'arm64-apple-ios16.0', '-isysroot', '$SDK', '-fstack-protector-strong']"
-# tu_device_get_cache_uuid() calls tu_device_get_build_id(), which by default reads the ELF
-# .note.gnu.build-id via disk_cache_get_function_identifier(). Our driver is a Mach-O dylib
-# (and -Dshader-cache=disabled), so that call fails and Vulkan device init aborts with
-# "cannot generate UUID". Mesa provides TU_BUILD_ID_OVERRIDE: a hex string hashed in place of
-# the ELF build-id. Define it to a fixed value so cache UUID generation is deterministic.
-CC_FLAGS="['-target', 'arm64-apple-ios16.0', '-isysroot', '$SDK', '-fstack-protector-strong', '-include', 'dlfcn.h', '-DUTIL_ARCH_LITTLE_ENDIAN=1', '-DUTIL_ARCH_BIG_ENDIAN=0', '-DTU_BUILD_ID_OVERRIDE=\\\"50414e444f52415f4255494c4449445f56315f6269726f6e\\\"']"
+CC_FLAGS="['-target', 'arm64-apple-ios16.0', '-isysroot', '$SDK', '-fstack-protector-strong', '-include', 'dlfcn.h', '-DUTIL_ARCH_LITTLE_ENDIAN=1', '-DUTIL_ARCH_BIG_ENDIAN=0']"
+# tu_device_get_cache_uuid() -> tu_device_get_build_id() reads the ELF .note.gnu.build-id by
+# default; our Mach-O dylib (built with -Dshader-cache=disabled) has none, so Vulkan device init
+# aborts with "cannot generate UUID". Mesa's TU_BUILD_ID_OVERRIDE substitutes a fixed hex string.
+# Inject the #define directly into the source: passing a quoted string through meson's cross-file
+# c_args arrives at clang as \"...\" (meson double-escapes the quote in build.ninja), which is a
+# syntax error in strlen(TU_BUILD_ID_OVERRIDE). A source-level define avoids that entirely.
+python3 - "$MESA/src/freedreno/vulkan/tu_device.cc" <<'PYEOF'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+marker = '#define TU_BUILD_ID_OVERRIDE'
+if marker not in s:
+    s = '#define TU_BUILD_ID_OVERRIDE "50414e444f52415f4255494c4449445f56315f6269726f6e"\n' + s
+    open(p, 'w').write(s)
+    print("injected TU_BUILD_ID_OVERRIDE into", p)
+else:
+    print("TU_BUILD_ID_OVERRIDE already present")
+PYEOF
 B=$OUT/build
 mkdir -p "$B"
 cat > "$B/ios.cross" <<EOF

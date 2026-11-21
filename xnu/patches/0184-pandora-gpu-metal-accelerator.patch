@@ -24,7 +24,7 @@ index 26117c1..95388f5 100644
  {
  	if (type != PANDORA_GPU_OPEN_TYPE) {
  		return kIOReturnUnsupported;
-@@ -371,14 +373,71 @@ PandoraAdrenoGpu::newUserClient(task_t owningTask, void *securityID, UInt32 type
+@@ -371,14 +373,76 @@ PandoraAdrenoGpu::newUserClient(task_t owningTask, void *securityID, UInt32 type
  	}
  	uc->client_ = c;
  	uc->views_ = (IOMemoryDescriptor **)views;
@@ -79,9 +79,14 @@ index 26117c1..95388f5 100644
 +bool
 +AGXAccelerator::start(IOService *provider)
 +{
-+	int metal = 0;
++	/* byron: publish unconditionally. The pandora_gpu_metal boot-arg is consumed
++	 * early on this device, so gating on it left backboardd with no IOAcceleratorES
++	 * and froze at the Apple logo. Keep reading it only for diagnostics. */
++	int metal = -1;
 +	(void)PE_parse_boot_argn("pandora_gpu_metal", &metal, sizeof(metal));
-+	if (!metal || !IOService::start(provider)) {
++	IOLog("PANDORA GPU UC: AGXAccelerator::start metal arg=%d\n", metal);
++	if (!IOService::start(provider)) {
++		IOLog("PANDORA GPU UC: AGXAccelerator IOService::start FAILED\n");
 +		return false;
 +	}
 +	setName("NativeAdrenoGpu");

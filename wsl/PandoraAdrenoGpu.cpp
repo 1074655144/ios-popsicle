@@ -618,9 +618,14 @@ OSDefineMetaClassAndStructors(AGXAccelerator, IOAcceleratorES);
 bool
 AGXAccelerator::start(IOService *provider)
 {
-	int metal = 0;
+	/* byron: publish unconditionally. The pandora_gpu_metal boot-arg is consumed
+	 * early on this device, so gating on it left backboardd with no IOAcceleratorES
+	 * and froze at the Apple logo. Keep reading it only for diagnostics. */
+	int metal = -1;
 	(void)PE_parse_boot_argn("pandora_gpu_metal", &metal, sizeof(metal));
-	if (!metal || !IOService::start(provider)) {
+	IOLog("PANDORA GPU UC: AGXAccelerator::start metal arg=%d\n", metal);
+	if (!IOService::start(provider)) {
+		IOLog("PANDORA GPU UC: AGXAccelerator IOService::start FAILED\n");
 		return false;
 	}
 	setName("NativeAdrenoGpu");

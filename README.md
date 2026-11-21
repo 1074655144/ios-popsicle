@@ -30,44 +30,49 @@ Normal testing writes nothing to the phone's partitions. The kernel starts with 
 
 ## Status
 
-This section describes **only the Xiaomi 17 Max (`byron`) fork**. The percentages in the upstream README are the original author's estimates for the Xiaomi 17 Pro Max (`popsicle`); they are not measurements and are intentionally **not reproduced here**. See **[docs/byron/LIVE_BRINGUP_STATUS.md](docs/byron/LIVE_BRINGUP_STATUS.md)** for the current RAM-boot evidence and **[docs/byron/PHASE_CLOSEOUT.md](docs/byron/PHASE_CLOSEOUT.md)** for the earlier phase closeout.
+Below is the status of the Xiaomi 17 Max (`byron`) real device. The progress text and status markers follow the original author's wording; the **Started on byron?** column shows whether this fork has actually started that item on byron. See **[docs/byron/LIVE_BRINGUP_STATUS.md](docs/byron/LIVE_BRINGUP_STATUS.md)** for the current RAM-boot evidence and **[docs/byron/PHASE_CLOSEOUT.md](docs/byron/PHASE_CLOSEOUT.md)** for the earlier phase closeout.
 
 Reusable per-phone capture/build/log steps are in **[docs/PHONE_DATA_CAPTURE.md](docs/PHONE_DATA_CAPTURE.md)**. Real-time phone data (extents, logs, screenshots, images) is intentionally not committed.
 
-**Legend:** 🟢 verified on byron · 🟡 partially verified on byron · 🟠 current bring-up work / blocker · ⚪ not started or not verified on byron
+**Legend:** 🟢 works · 🟡 partly works · 🟠 in progress · ⚪ not started (original author's status markers). **Started on byron?** ✅ at least part of the row has been worked on in this fork · ⬜ not started on byron.
 
-### Boot chain actually reached on byron
+### System
 
-| Component | Byron status | Notes |
-|---|---|---|
-| RAM boot (`fastboot boot`) | 🟢 | XNU boots from RAM; no partition write, no AVB change |
-| Root filesystem | 🟢 | 16 GiB non-journaled HFS+ root built from an iPhone X IPSW; binary-plist keybag fixed; root mounted |
-| Early userspace | 🟢 | `launchd` exec succeeds; dyld shared cache mapped; `launchd_unsecure_cache=1` gets past the AMFI cache-loader failure |
-| Display / framebuffer | 🟡 | Correct stride 4800; black background with white Apple Logo and backlight confirmed; no desktop UI yet |
-| `SpringBoard` / `backboardd` | 🟡 | Both processes exec; fix7 logs show CPU compositing and backlight on, then stop at the Apple Logo |
-| Lock screen / home screen / built-in apps | 🟠 | Not reached; fix8 screen/log result is still pending |
-| GPU / Metal (Adreno 840) | 🟠 | fix7 logs never found `IOAcceleratorES / AGXAccelerator`; GPU path is not enabled yet |
-| CPU cores / frequency scaling / idle | 🟡 | Kernel runs on byron; core count, DVFS and idle behaviour are not characterized yet |
-| Touch, buttons, brightness control | ⚪ | Not verified beyond the Apple Logo stage |
-| Battery gauge, charging, thermal model | ⚪ | Not verified on byron |
-| App Store apps | ⚪ | Not reached; no claim is made here |
+| Component | Progress | Status | Started on byron? | Notes |
+|---|---|---|---|---|
+| Boot, lock screen, home screen, built-in apps | `████████░░` 80% | 🟢 | ✅ | Slow boot, occasional UI freezes |
+| Touch, power and volume buttons, brightness | `█████████░` 90% | 🟢 | ⬜ | |
+| Display and GPU (Adreno 840, Metal) | `███████░░░` 70% | 🟡 | ✅ | Whole UI composited by the GPU. Known glitches: text, pink Reachability, clipped icons |
+| CPU (8 cores, frequency scaling, idle) | `████████░░` 85% | 🟢 | ✅ | |
+| Battery gauge and charging | `███████░░░` 70% | 🟡 | ⬜ | Real gauge values, power saving barely started |
+| Thermal management | `█████░░░░░` 50% | 🟡 | ⬜ | Chip sensors only, no skin temperature model |
+| App Store apps | `█░░░░░░░░░` 10% | 🟡 | ⬜ | Most do not open: they rely on Apple's hardware security |
 
-### Connectivity, media and sensors
+### Connectivity
 
-| Component | Byron status | Notes |
-|---|---|---|
-| Wi-Fi chip / firmware (WCN7880) | ⚪ | Not enabled in the current boot path; upstream Wi-Fi progress does not apply |
-| Wi-Fi scan / connection / data | ⚪ | Not tested on byron |
-| Wi-Fi settings panel and status icon | ⚪ | UI not reached |
-| Modem firmware | ⚪ | Not started on byron |
-| 4G/5G, calls, SMS, SIM | ⚪ | Not connected to iOS |
-| Bluetooth | ⚪ | Not verified; fix8 explicitly excludes `bluetoothd` and `fairplayd.H2` |
-| USB | ⚪ | Android-side ADB is only used to capture pinned logs; iOS USB is not verified |
-| NFC, GPS | ⚪ | Not started |
-| Speakers | ⚪ | ADSP / CS35L43 path exists but is not exercised on byron yet |
-| Microphones, earpiece, vibration motor | ⚪ | Not started |
-| Cameras | ⚪ | Not started; iOS normally expects Apple's ISP |
-| Motion/light sensors, fingerprint, rear display | ⚪ | Not started |
+| Component | Progress | Status | Started on byron? | Notes |
+|---|---|---|---|---|
+| Wi-Fi: chip and firmware (WCN7880) | `███████░░░` 70% | 🟡 | ⬜ | Firmware boots. About one boot in five dies early, and it often hangs on the association request |
+| Wi-Fi: scan | `███████░░░` 70% | 🟡 | ⬜ | Works when the firmware survives. 2.4 GHz with the phone's own board file, 5 GHz not heard yet |
+| Wi-Fi: connection and data | `████░░░░░░` 35% | 🟠 | ⬜ | WPA2 connects on about one boot in ten. DHCP address and received traffic seen on a few boots. Ping and DNS not proven yet |
+| Wi-Fi: Settings panel and status icon | `░░░░░░░░░░` 0% | ⚪ | ⬜ | |
+| Modem firmware | `███████░░░` 70% | 🟡 | ⬜ | Boots fully with its services, all writes kept in RAM |
+| 4G/5G, calls, SMS, SIM | `░░░░░░░░░░` 0% | ⚪ | ⬜ | Not connected to iOS yet |
+| Bluetooth | `░░░░░░░░░░` 0% | ⚪ | ⬜ | |
+| USB | `██░░░░░░░░` 20% | 🟠 | ⬜ | Live kernel log and remote restart. No data or networking yet |
+| NFC, GPS | `░░░░░░░░░░` 0% | ⚪ | ⬜ | |
+
+### Media and sensors
+
+| Component | Progress | Status | Started on byron? | Notes |
+|---|---|---|---|---|
+| Speakers | `███████░░░` 75% | 🟢 | ⬜ | Plays sound through the ADSP and CS35L43 amplifiers, one crash seen under load |
+| Microphones, earpiece | `░░░░░░░░░░` 0% | ⚪ | ⬜ | |
+| Vibration motor | `░░░░░░░░░░` 0% | ⚪ | ⬜ | |
+| Cameras | `░░░░░░░░░░` 0% | ⚪ | ⬜ | Hardest part: iOS expects Apple's ISP |
+| Motion and light sensors | `░░░░░░░░░░` 0% | ⚪ | ⬜ | |
+| Fingerprint reader | `░░░░░░░░░░` 0% | ⚪ | ⬜ | |
+| Rear display | `░░░░░░░░░░` 0% | ⚪ | ⬜ | |
 
 ## Getting started
 

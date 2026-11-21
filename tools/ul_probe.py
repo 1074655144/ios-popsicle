@@ -2,7 +2,11 @@
 """Probe a parsed unified-log jsonl for the white-Apple stall. Read-only.
 
 Usage: ul_probe.py <ul.jsonl> [mode]
-Modes: span | sb | errors | boot | all
+Modes: span | sb | errors | boot | life | bootui | sim | all
+
+  life   : exec/exit/terminate of SpringBoard/backboardd/launchd in time order
+  bootui : BKBootUIPresenter / bootUI / assert / ALS / swap_end events
+  sim    : "Software renderer"/"Simulating crash"/ReportCrash crash synthesis
 """
 import json, sys, collections
 
@@ -59,6 +63,46 @@ if mode in ('errors', 'all'):
              ('SpringBoard', 'backboardd', 'launchd', 'securityd', 'containermanagerd', 'usermanagerd'))]
     for r in focus[:80]:
         print(' ', show(r))
+
+def sortrows(rs):
+    return sorted(rs, key=lambda d: ts(d))
+
+
+if mode in ('life', 'all'):
+    print()
+    print('=== LIFECYCLE: exec/exit/terminate/crash of SB/BB/launchd (time order) ===')
+    kws = ('exec ', 'exec(', 'exited', 'exit reason', 'terminate', 'terminating',
+           'crashed', 'sig ', 'signal ', 'launchd', 'restart', 'respawn')
+    proc_kw = ('SpringBoard', 'backboardd', 'launchd', 'FrontBoard', 'BootUI')
+    life = []
+    for d in rows:
+        msg = (d.get('message') or '')
+        proc = (d.get('process') or '')
+        if any(k in msg for k in kws) and (any(p in msg for p in proc_kw) or any(p in proc for p in proc_kw)):
+            life.append(d)
+    for r in sortrows(life)[:200]:
+        print(' ', show(r, 260))
+    print('  (total {})'.format(len(life)))
+
+if mode in ('bootui', 'all'):
+    print()
+    print('=== BOOTUI: BKBootUIPresenter/bootUI/assert/ALS/swap_end ===')
+    kws = ('BKBootUIPresenter', 'bootUI', 'BootUI', 'AssertMacros', 'assert',
+           'ALS', 'swap_end', 'simulate', 'present', 'screen owner', 'CBU_')
+    ui = [d for d in rows if any(k in (d.get('message') or '') for k in kws)]
+    for r in sortrows(ui)[:200]:
+        print(' ', show(r, 260))
+    print('  (total {})'.format(len(ui)))
+
+if mode in ('sim', 'all'):
+    print()
+    print('=== SIM: Software renderer / Simulating crash / ReportCrash synthesis ===')
+    kws = ('Software renderer', 'Simulating crash', 'simulated', 'ReportCrash',
+           'crash report', 'appex', 'CoreServer')
+    sim = [d for d in rows if any(k in (d.get('message') or '') for k in kws)]
+    for r in sortrows(sim)[:200]:
+        print(' ', show(r, 260))
+    print('  (total {})'.format(len(sim)))
 
 if mode in ('boot', 'all'):
     print()

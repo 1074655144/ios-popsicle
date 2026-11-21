@@ -307,3 +307,61 @@ SpringBoard 侧日志。下一步应聚焦拿到 SpringBoard 的实际卡点（�
 白苹果 = **SpringBoard 在 user session 初始化阶段反复失败退出**。由于 SpringBoard 自身不写日志，
 下一步看它崩溃时是否留下 `.ips` 崩溃报告（在 `/private/var/mobile/Library/Logs/CrashReporter/`，
 需从手机镜像单独抓），或对照上游 patches 中 SpringBoard 首启/激活/容器相关的处理。
+
+## 06:47–07:0x 深挖 unified log：找到白苹果循环的直接触发器（重大发现）
+
+### 新工具（只读，不入库实时数据）
+- `tools/ul_probe.py` 新增 3 个模式：`life`（exec/exit 生命周期）、`bootui`（bootUI/assert/ALS/swap）、
+  `sim`（Software renderer/Simulating crash/ReportCrash 合成）。
+- 新增 `tools/ul_sb_timeline.py`：按进程名而非 pid 抓 SpringBoard 链路（**重要更正：pid 25 是
+  runningboardd，pid 26 才是 SpringBoard**，旧 `sb` 模式按 pid==25 抓错了对象，把 runningboardd
+  的日志误当 SpringBoard）。
+- 新增 `tools/crash_fetch.py`：只读从手机 pinned root 镜像（`adb` + `pinfile rawreadat`，经 FBE
+  之下裸读）列出/dump `/private/var/mobile/Library/Logs/CrashReporter/` 的 `.ips`。
+
+### 决定性证据：CoreAnimation 主动模拟崩溃 = 重启循环触发器
+统一日志时间线（1970 纪元 = boot 相对时间）显示反复出现的固定序列：
+```
+25.712  backboardd: (CBU_ShouldWaitForALS) error: timeout waiting for ALS arrival
+25.712  backboardd: Current bootUI is an Apple Logo
+25.712  backboardd: updateOverlay: No explicit screen owner
+25.713  backboardd: CoreAnimation: Software renderer! Simulating crash!   <-- 主动模拟崩溃
+25.800  launchd: exited with exit reason (namespace: 9 code: 0xe) - OS_REASON_EXEC
+```
+`Software renderer! Simulating crash!` 共 3 次（25.713 / 29.083 / 30.465 s），每次紧跟
+launchd 的 `OS_REASON_EXEC` 退出，然后 SpringBoard/backboardd 重启（exec SpringBoard 5 次）。
+**即：backboardd 的 CoreAnimation 判定自己跑在软件渲染器上，主动模拟一次 crash 来触发重启——
+这就是"白苹果反复重启"的直接触发器**，解释了为什么每 1–4 秒 exec 一次 SpringBoard。
+
+### GPU 状态的关键矛盾（内核日志 vs 统一日志）
+- **内核环日志 fix15long**（第一次启动）GPU 是通的：14.898s `AGXAccelerator client 0 opened`,
+  `open AGX type 16711 -> 0x0`；25.57s `pipeline_libraries_made +33`、`pipelines_linked +17`、
+  `shader_modules_made +21`、`Autotune sysmem 11`、`command_buffers_submitted +20`——真实渲染发生。
+- **但统一日志 fix15long2**（后续重启周期）显示 GPU 重新初始化时失败：
+  - 27.783s `tu_device.cc:1752: cannot generate UUID (VK_ERROR_INITIALIZATION_FAILED)`
+    （注意：**UUID 修复在第一次 boot 生效了**——内核日志里第一次没有此错；这是重启后的新实例）
+  - 27.783s / 28.614s `native-metal: device refused: Vulkan(VkResultCode(-3))`
+  - 28.614s `tu_knl_darwin.cc:130 IOServiceOpen(IOAcceleratorES,0x4147) failed: 0xe00002d8`
+    （0xe00002d8 = kIOReturnNoResources / GPU client window 耗尽）
+- **综合判断**：第一次 SpringBoard/backboardd 起来时 GPU 正常、渲染发生，但 CoreAnimation 在
+  bootUI 阶段仍判定"软件渲染"（可能因 `pandora-metal refused: no pipeline library:
+  default.pipelinelib` 预编译管线库缺失，QuartzCore 回退到现场编译 / 软件路径），于是主动
+  `Simulating crash` → 重启；重启后 GPU client window 未及时释放，Vulkan 设备初始化失败，
+  形成"软件渲染→crash→重启→GPU 耗尽"的恶性循环。这与"等 30 分钟 lsd 就能进桌面"假设被
+  fix15long 证伪一致——根因不是慢，是**循环重启**。
+
+### 崩溃报告侧（只读抓取结果）
+`crash_fetch.py` 从 pinned root 镜像列出 `/private/var/mobile/Library/Logs/CrashReporter/`
+共 76 个 `.ips`，**全部是 `bluetoothd` / `fairplayd.H2`**（`sweetnoexec` 基线里每 10 s 被 SIGKILL
+的进程），**没有 SpringBoard / backboardd / kernel 的崩溃报告**。再次印证 SpringBoard 是
+"Simulating crash 后主动 exit"，不是被 watchdog/jetsam 杀死或产生真实 crash dump。
+
+### 下一步（三个候选方向，未擅改）
+1. **消掉 `Software renderer` 判定**：查 `pandora-metal refused: no pipeline library:
+   default.pipelinelib`——把预编译 pipeline library 放进 root，或让 QuartzCore 不因缺该库回退
+   到软件渲染路径（对照上游 EXPERIENCE 的 Metal/plugin 部分，byron 未验证，需真机逐项做）。
+2. **修 GPU client window 耗尽**：重启后 `IOServiceOpen 0xe00002d8`，查内核 `0xe00002d8` 来源
+   与 client 释放路径（可能需 kernel patch + CI 重编，耗时长）。
+3. **绕开 bootUI 的 ALS 等待**：`(CBU_ShouldWaitForALS) timeout waiting for ALS arrival` 后
+   才走到 Simulating crash，查能否用 boot-arg/ADT 让设备声明 ALS 可用或跳过该等待。
+优先级建议 1 > 3 > 2（1 可能一处修复即打破循环；2 需重编内核成本最高）。

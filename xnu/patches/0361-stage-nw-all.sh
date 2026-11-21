@@ -44,6 +44,8 @@ STUB nw_wifi_irq_pending
 STUB nw_wifi_poll
 STUB nw_wifi_wait_ms
 STUB nw_wifi_stop
+STUB nw_mhi_crash_report
+STUB nw_wifi_control_transport_set
 .data
     .globl _nw_wifi_stats
 _nw_wifi_stats: .zero 64

@@ -107,20 +107,34 @@ fix12 确认内核侧 AGX 已打通，白苹果卡点转移到用户态 Metal �
 - **插件来源**：`.github/workflows/turnip.yml` 交叉编译 `NativeAdrenoMetal`（UniXNU NativeMetal
   经 `tools/metal/adapt_ios16.py` 适配 iOS 16）和 Turnip，发布到 `turnip-ci` pre-release。
   fork 和上游目前**都没有** `turnip-ci` release；本地 `/opt/work/gpu/turnip` 为空。
-- **硬件匹配**：byron GPU = `Adreno840v2`（DT `qcom,gpu-model`），手机有
-  `gen80200_gmu.bin` / `gen80200_sqe.fw` / `gen80200_aqe.fw`，与 gpu_pack.sh 的 gen80200 一致。
-  唯一缺口：byron **没有** `gen80200_zap.mbn`（gpu_pack.sh 必需），需确认是否可用 aqe.fw 替代或另行提取。
+- **硬件匹配**：byron GPU = `Adreno840v2`（DT `qcom,gpu-model`），与 gpu_pack.sh 的 gen80200 一致。
+  三个必需固件齐全（更正早前误判）：`gen80200_gmu.bin` / `gen80200_sqe.fw` 在 `/vendor/firmware/`，
+  `gen80200_zap.mbn` 在 `/odm/firmware/`（不是 vendor，之前只搜了 vendor 才误判缺失）。
 
-**阻塞点：turnip CI 构建失败**（run `44882253512`，步骤 Build）：
-meson 交叉编译报 `UTIL_ARCH_LITTLE_ENDIAN unset`、`PIPE_FORMAT_RG88_UNORM undeclared`、
-`Dl_info/dladdr undeclared`（19 errors）。属工具链版本漂移导致的配置问题（cross-file 已写
-`endian = 'little'`，但新版 meson 未转成编译宏），非源码缺陷。修 `tools/turnip/build_ios.sh`
-的 cross-file / meson 配置后可重试。
+**turnip CI 构建失败根因（已定位并修复，提交 `73799a0`）**：run `44882253512` 步骤 Build 报
+`UTIL_ARCH_LITTLE_ENDIAN unset`、`PIPE_FORMAT_RG88_UNORM undeclared`、`Dl_info/dladdr undeclared`，
+全部出自 flex 生成的 `ir3_lexer.c` 一个编译单元（同批 `ir3_parser.c` 正常）。根因：cross-file 让
+meson 在 macOS host 探测到 `HAVE_ENDIAN_H=1`，但实际用 iOS SDK 编译，`<endian.h>` 无 `__BYTE_ORDER`
+→ `u_endian.h` 字节序宏未定义 → 连带字节序依赖的 PIPE_FORMAT 别名和 dladdr 分支全崩。
+修复：`tools/turnip/build_ios.sh` 的编译参数注入 arm64 恒定小端宏
+`-DUTIL_ARCH_LITTLE_ENDIAN=1 -DUTIL_ARCH_BIG_ENDIAN=0`，并对编译单元 `-include dlfcn.h`；
+链接参数保持不变。纯编译配置，不改源码。重跑 run `44924717465`（head `73799a0`）进行中。
+
+**CI 一次成功即可拿到全部插件产物**：turnip.yml 先构建 Turnip（`libvulkan_freedreno.dylib`
++ `vktest`）并发布 `turnip-ci` pre-release；随后 `continue-on-error` 的 Metal plugin 步骤构建
+`NativeAdrenoMetal` + `Info.plist` + `mtltest` 并上传到同一 release。上一轮因 Build 失败（set -e）
+两步都被跳过，所以必须先修通 Build。gpu_pack.sh 所需的 6 个签名文件会全部齐备。
+
+打包工具链：`tools/mkfwpack.py`、`tools/pgputest/mktc.py` 均纯 Python 标准库，WSL 可跑，
+插件二进制从 release 下载后 fwpack.img 打包可在本机完成，无需 macOS。
 
 下一步顺序（每步单独验证，不要混在一起）：
-1. 修 turnip CI 编译配置 → 重跑 `turnip.yml` → 从 `turnip-ci` release 下载插件产物。
-2. 按 byron 固件调整 `gpu_pack.sh`（zap.mbn 缺口）→ 生成 fwpack.img + gpu.tc。
-3. rawwrite fwpack.img 到 adspfw.img 的 pinned 物理块 + 重采 adspfw extents + 重打 loader。
-4. `fastboot boot` → 内核安装器把插件装进 root → 抓日志确认 NativeAdrenoMetal.bundle 加载。
+1. 等 run `44924717465`：先确认 Turnip 的 Build + Pre-release 成功，再确认 Metal plugin 成功。
+2. 从 `turnip-ci` release 下载 6 个文件（libvulkan_freedreno.dylib / vktest / NativeAdrenoMetal /
+   NativeAdrenoMetal.Info.plist / mtltest / SHA256SUMS*.metal）到 `/opt/work/gpu/turnip`，校验 SHA256。
+3. 从手机 pull 三个 gen80200 固件（gmu/sqe 在 vendor，zap 在 odm）到 FWDIR，跑 `gpu_pack.sh`
+   （或 WSL 下等价的 mkfwpack + mktc 流程）生成 fwpack.img + gpu.tc。
+4. rawwrite fwpack.img 到 adspfw.img 的 pinned 物理块 + 重采 adspfw extents + 重打 loader。
+5. `fastboot boot` → 内核安装器把插件装进 root → 抓日志确认 NativeAdrenoMetal.bundle 加载。
 
 全程约束：小米17 Max `byron`；不刷分区、不改 AVB、不做额外解锁。

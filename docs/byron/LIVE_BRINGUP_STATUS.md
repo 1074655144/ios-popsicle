@@ -20,7 +20,61 @@
 | fix6 | `launchd_cache_loader[22]` namespace 7 / subcode 0x21，`Unable to find AMFI` | 补 `launchd_unsecure_cache=1` | `Cache sent to launchd successfully` |
 | fix7 | `SpringBoard`、`backboardd` 启动并点亮背光，但停在苹果 Logo；backboardd 一直找不到 `IOAcceleratorES / AGXAccelerator` | 按项目首启 CPU 渲染基线补齐 boot args | 进入 fix8 |
 | fix8 | 加入首启 CPU 渲染参数后仍是白苹果 Logo | 固定 boot args：`unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin wdt=-1 sweetfb_hz=30 sweetfb_fill=1 sweetnoexec=bluetoothd,fairplayd.H2` | `fastboot boot` 成功，无 panic |
-| fix9 / fix10 | `backboardd` 找到 `IOAcceleratorES`（`0 found`），但仍找不到 `AGXAccelerator`（`none`）；`pandora_gpu_metal=1` 未能保留到最终 cmdline | 补丁 0184 改为无条件发布 `AGXAccelerator`；提交 `66718c4`，触发 xnu CI run `44920089727` | 等待新内核编译 |
+| fix9 / fix10 | `backboardd` 找到 `IOAcceleratorES`（`0 found`），但仍找不到 `AGXAccelerator`（`none`）；`pandora_gpu_metal=1` 未能保留到最终 cmdline | 补丁 0184 改为无条件发布 `AGXAccelerator`；提交 `66718c4`，触发 xnu CI run `44920089727` | 新内核编译成功（`535466b6`） |
+| fix11 | panic：`launchd failed to start -- exit(1)`，`Library not loaded: /usr/lib/libSystem.B.dylib (no such file, no dyld cache)` | 清晰 panic 照片读出原因；逐项排除内核/打包差异后，定位为 **root extents 漂移** | rawwrite 重写 + 重采 extents，见下 |
+| fix12 | 新内核 + 新 extents，无 panic，跑到 229 s | rawwrite 16 GiB 重写 root；重采 extents（2004→5531 段）；重建 ADT/payload/loader | **launchd 恢复，AGXAccelerator 从 `none` 变 `found` 并注册成功**；仍卡苹果 Logo |
+
+## fix11 根因：root extents 漂移（重要）
+
+fix11 只换了内核，cmdline / 内核 dyld+AMFI 字符串（241 项）/ PANDORA 补丁（除 AGX 两行诊断外 742 项）
+全部与 fix10 一致。 panic **不是** AGX 补丁引起，而是 root 镜像的 pinned 物理块发生了漂移：
+
+- 仓库 `device/byron/extents/iosroot.json`（fix10 用）：**2004 段**，首块 `116004737024`。
+- 手机当前 `pinfile extents /data/local/tmp/iosroot.img --json`：**5531 段**。
+- 前 26 段相同，从文件偏移 **211 MiB** 起物理块位置完全不同且严重碎片化
+  （例：偏移 `221249536` 旧为物理 `120261820416` 连续 5.6 MiB，现为 `27112755200` 仅 40 KiB）。
+- 内核拿旧 extents 读 root，211 MiB 之后的卷数据（dyld cache / libSystem 所在）全部读错，
+  launchd 找不到 `/usr/lib/libSystem.B.dylib` → panic。
+- 这也解释了为什么抓到的内核环日志与 fix10 逐字节相同：fix11 在写日志前就 panic 了。
+
+修复（fix12）：
+1. `pinwrite rawwrite` 把 `/data/local/tmp/iosroot.src2.img`（含 binary plist keybag，SHA 与本机
+   `/opt/work/iosroot.img` 一致）写回 `iosroot.img` 的 pinned 物理块。
+2. `pinfile extents --json` 重新采集 `iosroot` / `ioslog`，覆盖 `device/byron/extents/*.json`。
+3. 用新 extents 重建 ADT / payload / loader，只换内核 + extents，boot args 不变。
+4. `fastboot boot` 后回安卓抓日志，确认 launchd 不再 panic，再看 AGX 诊断。
+
+**结论**：每次 iOS 侧 `rootrw=1` 写入都可能改变 F2FS 物理布局；下一次 boot 前必须重采 extents。
+
+## fix12 结果：两个核心目标达成（2026-11-22）
+
+fix12 = 新内核 `535466b6` + 重采 extents（5531 段）+ fix10 boot args。内核环日志
+`165439 bytes, flush 48`，SHA `54b886cd`，与 fix10/fix11 的 `15a3c566` 完全不同（真实新日志），
+无 panic，跑到 229 秒。
+
+**突破 1 — extents 修复生效**：
+- `Using unsecure cache: /System/Library/xpc/launchd.plist` → `Cache sent to launchd successfully`
+- `exec SpringBoard` / `exec backboardd` 成功；不再有 `no dyld cache` panic。
+
+**突破 2 — AGX 补丁生效**（fix9/fix10 一直卡在这里）：
+- `[0.126] PANDORA GPU UC: AGXAccelerator::start metal arg=1`（诊断日志落盘，证明这次 metal arg 保留住了）
+- `[0.126] PANDORA GPU UC: AGXAccelerator (IOAcceleratorES) registered, plugin NativeAdrenoMetal`
+- `IOService::start FAILED` **没有出现** → start 成功。
+- backboardd 从 fix10 的 `AGXAccelerator -> none` 变成 `-> 1 found` / `-> AGXAccelerator`，
+  内核侧匹配与注册链路完全打通。
+
+**新的卡点（仍在苹果 Logo）**：
+- `[19.386] IOK backboardd: open AGXAccelerator type 1 -> 0xe00002c7`（`kIOReturnError`），
+  backboardd 反复 matching（14–24 s 间几十次）但 open 失败。
+- 全日志**没有任何** `NativeAdrenoMetal.bundle` / Metal 插件加载记录——root 镜像里没装这个插件，
+  内核只发布 `MetalPluginName=NativeAdrenoMetal` 属性，用户态找不到对应 bundle。
+- `SWEET FB: swap ... -> 0xe00002d5`（`kIOReturnTimeout`）反复出现，合成表面排队但交付超时。
+- 仍然没有 `exec loginwindow`（只有 xpcproxy 周期性启动），登录会话没进入。
+- `bluetoothd` / `fairplayd.H2` 周期性 CRASH 属于既定 sweetnoexec 基线。
+
+结论：内核侧 AGX 已打通，白苹果卡点转移到**用户态 Metal 插件缺失**。下一步需在 root 镜像安装
+`NativeAdrenoMetal.bundle`（Turnip Darwin 后端）并确认其 `MetalPluginClassName` 与内核属性匹配，
+再做一次 rawwrite + 重采 extents + boot。不要把登录会话排查与插件安装混进同一轮。
 
 ## fix7–fix10 关键日志结论（不提交原始日志）
 
@@ -34,20 +88,18 @@
 
 ## 当前产物（仅本机）
 
-- `incoming/loader-boot.img`：fix8 loader（被 `.gitignore` 排除）。
-- fix8 loader SHA256：`c8c85091a25d483f669246d34d708f9fe50a0405d602dbb77e467091cb7f7341`。
-- fix8 payload SHA256：以本机 `wsl/make_phone_payload.sh` 输出的 `sha256sum` 为准；产物不入库。
-- fix10 日志与截图：本地 `incoming/`，不入库。
-- CI run `44920089727` 正在重编内核；监控脚本写在 `/tmp/watch_ci.sh`，结果写 `/tmp/ci_result.txt`。
+- CI run `44920089727` 编译成功；新内核 `kernel.development.pandora` SHA256 `535466b6…`（AGX 无条件发布补丁）。
+- fix11 loader SHA256：`d509aa57…`（备份在 `incoming/loader-boot.img.fix11.bak`），已证实因 extents 漂移 panic。
+- fix10 及之前 extents 备份：`incoming/iosroot.json.fix10.bak`、`incoming/ioslog.json.fix10.bak`。
+- 所有镜像、日志、截图、实时 extents 均在 `incoming/` / `device/byron/extents/`，被 `.gitignore` 排除，不入库。
 
-## 下一步
+## 下一步（fix12）
 
-详细可执行清单见 [POST_KERNEL_VALIDATION.md](POST_KERNEL_VALIDATION.md)。
-
-1. 等 CI run `44920089727` 完成，用 `tools/byron_fetch_ci_kernel.py` 下载 `xnu-kernel` artifact 并核对 SHA256。
-2. 只替换内核重新打包 payload / loader；沿用 fix10 的 extents 和 boot args，不同时改用户态变量。
-3. `fastboot boot` 后回安卓，用 `bash tools/byron_capture.sh fix11 20` 抓内核环、unified log 和截图。
-4. 优先确认 `AGXAccelerator` 是否从 `none` 变成 `found`；再判断 `UMD_INIT` / `loginwindow` 是否仍是白苹果卡点。
-5. 若 AGX 已出现但仍卡 Logo，下一步专查登录会话链路；不要把 GPU 插件安装混进同一轮。
+1. rawwrite 重写 root（进行中）+ `pinfile extents --json` 重采 `iosroot` / `ioslog`。
+2. 用新 extents + 新内核 `535466b6` 打包 payload / loader；boot args 沿用 fix10，不变。
+3. `fastboot boot` 后回安卓，用 `bash tools/byron_capture.sh fix12 20` 抓内核环、unified log 和截图。
+4. 先确认 launchd 不再 panic（dyld cache 恢复），再看 `AGXAccelerator` 是否从 `none` 变 `found`，
+   以及两行新诊断日志 `metal arg=` / `IOService::start FAILED`。
+5. 若 AGX 出现但仍卡 Logo，下一步专查登录会话链路 / Metal 插件；不要把多个变量混进同一轮。
 
 全程约束：小米17 Max `byron`；不刷分区、不改 AVB、不做额外解锁。

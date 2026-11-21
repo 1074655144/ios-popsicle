@@ -26,6 +26,9 @@ PANDORA_LOG=$(winp "$ROOT/tools/pandora_log.py")
 IOSLOG_FETCH=$(winp "$ROOT/tools/ioslog_fetch.py")
 SHOT_FETCH=$(winp "$ROOT/tools/shot_fetch.py")
 ADB=${ADB:-/d/Android/platform-tools/adb.exe}
+# Windows python runs ioslog_fetch.py / shot_fetch.py, and their subprocess calls
+# to adb need a native path too (a Git Bash /d/... or a CJK path fails to spawn).
+ADB_WIN=$(winp "$ADB")
 WSL_ROOT=${WSL_ROOT:-'//wsl$/Ubuntu-24.04'}
 WSL_DISTRO=${WSL_DISTRO:-Ubuntu-24.04}
 WSL_WORK=${WSL_WORK:-/opt/work}
@@ -58,11 +61,11 @@ IOSLOG_LEN=${IOSLOG_LEN:-8388608}
 python3 "$PANDORA_LOG" "$OUT/kernel_ring.raw" "$OUT/kernel_ring.txt"
 
 echo "[2/4] unified log archive -> $WSL_WORK/la_$NAME and ul_$NAME.jsonl"
-ADB=$ADB WSL_ROOT=$WSL_ROOT WSL_DISTRO=$WSL_DISTRO WSL_WORK=$WSL_WORK \
+ADB=$ADB_WIN WSL_ROOT=$WSL_ROOT WSL_DISTRO=$WSL_DISTRO WSL_WORK=$WSL_WORK \
   python3 "$IOSLOG_FETCH" "$NAME" --minutes "$MINUTES" --parse
 
 echo "[3/4] screenshots -> $OUT/shots"
-ADB=$ADB WSL_ROOT=$WSL_ROOT WSL_DISTRO=$WSL_DISTRO WSL_WORK=$WSL_WORK \
+ADB=$ADB_WIN WSL_ROOT=$WSL_ROOT WSL_DISTRO=$WSL_DISTRO WSL_WORK=$WSL_WORK \
   python3 "$SHOT_FETCH" "$OUT/shots"
 
 echo "[4/4] summary -> $OUT/summary.txt"

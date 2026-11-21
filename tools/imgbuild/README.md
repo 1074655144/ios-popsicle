@@ -63,3 +63,20 @@ The script:
 
 The image itself is device runtime data: keep it outside the repo. It is
 ignored by `*.img`.
+
+## 4. Read-only self-check of a built image
+
+`check_owner.py` reads the HFS+ catalog BSD info (uid/gid/mode) of a built image
+directly — no phone, no writes. Use it to verify the `sweet-root-tweaks.py`
+preferences landed with the right ownership before booting:
+
+```bash
+python3 tools/imgbuild/check_owner.py /opt/work/iosroot.img             # uid:gid/mode table + verdict
+python3 tools/imgbuild/check_owner.py --cat /opt/work/iosroot.img \
+  /private/var/mobile/Library/Preferences/com.apple.purplebuddy.plist    # dump a plist
+```
+
+Pass a `/opt/...` WSL path from Git Bash with `MSYS_NO_PATHCONV=1`. Expected
+mobile-home mode is `0711` (cryptex-native, owner-traversable) — not `0755`.
+See `docs/byron/LIVE_BRINGUP_STATUS.md` (2026-11-22 A/B section) for why the
+"fix owner/mode" hypothesis was ruled out.

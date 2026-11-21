@@ -536,3 +536,56 @@ agent 把 `/var/empty` → volatile prefs 当作"偏好未生效"的根因证据
 - 最小 A/B（低优先先做）：核对/修正 mobile(501) home 与 Preferences 目录 owner/mode，重建镜像跑一次；
   验收指标：`Device PastBuddy` 是否变 1、`still in buddy` 是否消失、`removeOverlay` 是否 >0。
 - 不要做：改 0184 / boot args / swap_end / 重做 ALS/pipelinelib/窗口耗尽（均与本卡点无因果）。
+
+## 2026-11-22 A/B 前提核验：owner/mode 无误，结论修正（电脑端只读，未改镜像）
+
+上一轮最小 A/B 的第一步是"核对/修正 mobile(501) home 与 Preferences 目录 owner/mode"。本轮在**已构建镜像
+`/opt/work/iosroot.img`** 上做了纯只读核验（新增 `tools/imgbuild/check_owner.py`，直接读 HFS catalog 的
+BSD info：ownerID/groupID/fileMode），结论是**前提不成立，不做任何 owner/mode 修改，不重建镜像，不刷机**。
+
+### 实证 1：关键路径 owner/mode 全部正确
+```
+/private/var/mobile                          501:501 0711   (cryptex 原生值，正确)
+/private/var/mobile/Library                  501:501 0711   (同上)
+/private/var/mobile/Library/Preferences      501:501 0755   OK
+/private/var/mobile/Library/Preferences/com.apple.purplebuddy.plist  501:501 0600  OK
+/private/var/mobile/Library/Preferences/com.apple.migration.plist    501:501 0600  OK
+/private/var/mobile/Library/Preferences/com.apple.springboard.plist  501:501 0600  OK
+```
+0711 = owner rwx / group x / other x，是 iOS mobile home 的原生 mode；owner(501) 可正常遍历读取。
+上一轮 A/B 里"0711 需改 0755"的假设是我凭空设的期望值，**不是故障**——已把工具里的 EXPECT 修正为 0711。
+→ **owner/mode 这条 A/B 分支证伪，不能靠改权限修好白苹果。**
+
+### 实证 2：偏好内容与 marker 齐全，无覆盖冲突
+dump 镜像内 plist（check_owner.py --cat）确认：
+- `com.apple.purplebuddy.plist`: `SetupDone=True, SetupFinishedAllSteps=True, SetupVersion=11, daemonizeNeedsToRun=False`；
+- `com.apple.migration.plist`: `LastSystemVersion=20H392` + `SyntheticDidUpgrade=False`；
+- `com.apple.purplebuddy.notbackedup.plist`: 七个 mini-buddy 开关全 False；
+- 无 `ByHost` 目录（cfprefsd 无 byhost 覆盖）；`.GlobalPreferences` 只有语言/区域；
+- `SetupAssistant.framework/com.apple.purplebuddy.plist` 是 logging 子系统配置（DEFAULT-OPTIONS/TTL），
+  **不是偏好默认值**，不含 `SetupDone=NO`，不构成冲突。
+
+### 实证 3（重要修正）：偏好域被读取，但不同进程对 buddy 状态判定相反
+上一轮结论"全日志搜 SetupDone 命中 0 = 偏好完全没被加载"**过强，需修正**。同一 boot 25.66–25.79 s 时间线：
+```
+25.663 nanoregistryd  notification com.apple.purplebuddy.setupexited.enabled prefs value: 0
+25.663 nanoregistryd  enabling launch notification com.apple.purplebuddy.setupexited
+25.663 nanoregistryd  notification com.apple.purplebuddy.setupexited.enabled prefs value: 2   <- 域被读写
+25.739 remindd        DADBuddyStateObserver: Start observing buddy finished notification.
+25.757 remindd        RDAccountInitializer: We are still in buddy
+25.758 remindd        DAAgentManager: Device PastBuddy is 0
+25.789 cloudpaird     DeviceManager buddy is done            <- 与 remindd 相反
+```
+5/5 boot 同构。`nanoregistryd` 读到了 `com.apple.purplebuddy.setupexited.enabled`（0→2），说明 **cfprefsd
+确实在处理 com.apple.purplebuddy 偏好域**；`cloudpaird` 判定 `buddy is done`，而 `remindd` 的 DataAccess
+框架判定 `PastBuddy is 0`。两者用的判定源不同——问题从"偏好没加载"收敛为
+**"DA 框架判定 buddy 完成所依据的那一个状态源没被置位"**，具体是哪个源（某个通知 marker /
+`/private/var/buddy` 空目录里的文件 / data_ark 另一字段）静态材料无法确定。
+
+### 结论与下一步（未执行）
+- **本轮不改镜像、不刷机**：owner/mode 正确，plist 正确，改权限的 A/B 分支已证伪。
+- `tools/imgbuild/check_owner.py` 固化为只读自检工具：默认列关键路径 uid/gid/mode + 判定，`--cat` dump 偏好内容。
+- 回归：`test_port_tools.py` 91/0 绿；两文件 py_compile 通过；仅提交工具+文档，实时日志/镜像未入库。
+- 真机 A/B（低优先，需用户在场）：若要继续验证"DA 判定源"假设，方向是 buddy-done 通知 marker，
+  而非 owner/mode；但收益低、成本高（上次 boot 已证实系统确定性停在 buddy），**建议先搁置**。
+- 不要做（沿用上一轮）：改 0184 / boot args / swap_end / 重做 ALS/pipelinelib/窗口耗尽。

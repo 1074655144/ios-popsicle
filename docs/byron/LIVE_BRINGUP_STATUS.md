@@ -19,27 +19,35 @@
 | fix5 | keybag 阶段重启 | `systembag.kb` 改为 plain binary plist，目录 0777、文件 0600 | root 挂载、`launchd`、dyld cache 映射均成功 |
 | fix6 | `launchd_cache_loader[22]` namespace 7 / subcode 0x21，`Unable to find AMFI` | 补 `launchd_unsecure_cache=1` | `Cache sent to launchd successfully` |
 | fix7 | `SpringBoard`、`backboardd` 启动并点亮背光，但停在苹果 Logo；backboardd 一直找不到 `IOAcceleratorES / AGXAccelerator` | 按项目首启 CPU 渲染基线补齐 boot args | 进入 fix8 |
-| fix8 | 当前运行 | 加入 `unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin wdt=-1 sweetfb_hz=30 sweetfb_fill=1 sweetnoexec=bluetoothd,fairplayd.H2` | `fastboot boot` 成功，屏幕/日志待确认 |
+| fix8 | 加入首启 CPU 渲染参数后仍是白苹果 Logo | 固定 boot args：`unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin wdt=-1 sweetfb_hz=30 sweetfb_fill=1 sweetnoexec=bluetoothd,fairplayd.H2` | `fastboot boot` 成功，无 panic |
+| fix9 / fix10 | `backboardd` 找到 `IOAcceleratorES`（`0 found`），但仍找不到 `AGXAccelerator`（`none`）；`pandora_gpu_metal=1` 未能保留到最终 cmdline | 补丁 0184 改为无条件发布 `AGXAccelerator`；提交 `66718c4`，触发 xnu CI run `44920089727` | 等待新内核编译 |
 
-## fix7 关键日志（结论，不提交原始日志）
+## fix7–fix10 关键日志结论（不提交原始日志）
 
 - `launchd_unsecure_cache=1` 生效：`Cache sent to launchd successfully`。
-- `exec SpringBoard`、`exec backboardd` 成功；49 秒时 backboardd 完成 5 次 CPU 合成并点亮背光。
-- 无 panic、无 `FATAL KEYBAG ERROR`。
-- 13–205 秒 backboardd 持续查询 `IOAcceleratorES / AGXAccelerator`，结果均为 `none`；49.9 秒后没有新画面提交。
-- 从 root 镜像取出的两张截图均为纯黑底白苹果 Logo，无进度条/锁屏/桌面。
+- `exec SpringBoard`、`exec backboardd` 成功；fix7 中 backboardd 完成 5 次 CPU 合成并点亮背光。
+- fix10 中 `backboardd` 能匹配到 `IOAcceleratorES`（`0 found`），但 `AGXAccelerator` 一直是 `none`，没有进入 Metal 设备发现。
+- fix10 有 `UMD_INIT: failed to read nextsession dict`、`UMD_INIT: FAILED to Set Foreground ID`，之后没有 `exec loginwindow`；这是当前白苹果卡点的第二个可疑用户态阻塞项。
+- fix10 有 `exec DumpPanic` 和一次 `CRASH driverkitd`，但没有新的内核 panic 行；截图仍是纯黑底白苹果 Logo。
+- `bluetoothd` / `fairplayd.H2` 周期性重启，属于已设置的 `sweetnoexec` 基线，不是本轮新增阻塞。
+- 当前 root 镜像未安装 `NativeAdrenoMetal.bundle` / Turnip；内核侧 AGX 打通后仍需单独处理用户态 Metal 插件。
 
 ## 当前产物（仅本机）
 
 - `incoming/loader-boot.img`：fix8 loader（被 `.gitignore` 排除）。
 - fix8 loader SHA256：`c8c85091a25d483f669246d34d708f9fe50a0405d602dbb77e467091cb7f7341`。
 - fix8 payload SHA256：以本机 `wsl/make_phone_payload.sh` 输出的 `sha256sum` 为准；产物不入库。
-- 真机 extents 每次 rawwrite 后都会变化，必须重采；历史 JSON 不作为资产提交。
+- fix10 日志与截图：本地 `incoming/`，不入库。
+- CI run `44920089727` 正在重编内核；监控脚本写在 `/tmp/watch_ci.sh`，结果写 `/tmp/ci_result.txt`。
 
 ## 下一步
 
-1. 确认 fix8 当前屏幕：锁屏/桌面视为用户态首启通过；仍为苹果 Logo 则回安卓抓 fix8 日志。
-2. 若仍卡 Logo，按 `[PHONE_DATA_CAPTURE.md](../PHONE_DATA_CAPTURE.md)` 第 5 节抓 `ioslog` + unified log + screenshot，再定位下一个用户态阻塞项。
-3. 当前**没有**启用 GPU/Metal/音频等功能项；这些属于后续逐项按 byron 真机推进的范围，不照抄上游结果。
+详细可执行清单见 [POST_KERNEL_VALIDATION.md](POST_KERNEL_VALIDATION.md)。
+
+1. 等 CI run `44920089727` 完成，用 `tools/byron_fetch_ci_kernel.py` 下载 `xnu-kernel` artifact 并核对 SHA256。
+2. 只替换内核重新打包 payload / loader；沿用 fix10 的 extents 和 boot args，不同时改用户态变量。
+3. `fastboot boot` 后回安卓，用 `tools/byron_capture.sh fix11 20` 抓内核环、unified log 和截图。
+4. 优先确认 `AGXAccelerator` 是否从 `none` 变成 `found`；再判断 `UMD_INIT` / `loginwindow` 是否仍是白苹果卡点。
+5. 若 AGX 已出现但仍卡 Logo，下一步专查登录会话链路；不要把 GPU 插件安装混进同一轮。
 
 全程约束：小米17 Max `byron`；不刷分区、不改 AVB、不做额外解锁。

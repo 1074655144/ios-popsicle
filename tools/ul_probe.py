@@ -2,11 +2,12 @@
 """Probe a parsed unified-log jsonl for the white-Apple stall. Read-only.
 
 Usage: ul_probe.py <ul.jsonl> [mode]
-Modes: span | sb | errors | boot | life | bootui | sim | all
+Modes: span | sb | errors | boot | life | bootui | sim | owner | all
 
   life   : exec/exit/terminate of SpringBoard/backboardd/launchd in time order
   bootui : BKBootUIPresenter / bootUI / assert / ALS / swap_end events
   sim    : "Software renderer"/"Simulating crash"/ReportCrash crash synthesis
+  owner  : screen-owner/overlay handoff chain + per-boot summary + SpringBoard silence
 """
 import json, sys, collections
 
@@ -103,6 +104,38 @@ if mode in ('sim', 'all'):
     for r in sortrows(sim)[:200]:
         print(' ', show(r, 260))
     print('  (total {})'.format(len(sim)))
+
+if mode in ('owner', 'all'):
+    print()
+    print('=== OWNER: Apple Logo overlay / screen-owner handoff chain (read-only) ===')
+    kws = ('screen owner', 'System shell connected', 'systemShellChanged',
+           'Current bootUI', 'Presenting overlay', 'addOverlay', 'removeOverlay',
+           'BKBootUIPresenter', 'swap_end', 'first app')
+    own = [d for d in rows if any(k in (d.get('message') or '') for k in kws)]
+    for r in sortrows(own)[:260]:
+        print(' ', show(r, 250))
+    print('  (total {})'.format(len(own)))
+    # per-boot group summary
+    print()
+    print('=== per-boot summary ===')
+    groups = {}
+    for d in rows:
+        groups.setdefault(d.get('boot_uuid') or '?', []).append(d)
+    for k, v in sorted(groups.items(), key=lambda x: ts(x[1][0])):
+        sp = sorted(v, key=ts)
+        no_owner = sum(1 for d in v if 'No explicit screen owner' in (d.get('message') or ''))
+        rm = sum(1 for d in v if 'removeOverlay' in (d.get('message') or ''))
+        gpuarg = 'gpu15' if any('pandora_gpu=15' in (d.get('message') or '') for d in v) else 'NO-gpu15'
+        print('  {} {:6} rows {} -> {}  no-owner={} removeOverlay={} {}'.format(
+            k[:12], len(v), ts(sp[0])[:24], ts(sp[-1])[:24], no_owner, rm, gpuarg))
+    # SpringBoard silence check
+    print()
+    print('=== SpringBoard process silence ===')
+    execs = [d for d in rows if (d.get('message') or '').startswith('exec SpringBoard')]
+    own_sb = [d for d in rows if 'springboard' in str(d.get('process', '')).lower()
+              or 'springboard' in str(d.get('image', '')).lower()]
+    print('  exec SpringBoard count:', len(execs))
+    print('  SpringBoard-own unified-log rows:', len(own_sb))
 
 if mode in ('boot', 'all'):
     print()

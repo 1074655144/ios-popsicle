@@ -413,3 +413,74 @@ SpringBoard 侧日志。下一步应聚焦拿到 SpringBoard 的实际卡点（�
    crash 是否消失。与 overlay 是两条**独立线**，不可互相作为验收指标。
 3. **低成本附带**：修 `pandora_gpu=15` boot-arg 注入稳定性，消除早期 open refused 瞬态。
 4. **结案不做**：ALS 方向、pipelinelib 拷贝、"窗口耗尽"内核 patch + 重编。
+
+---
+
+## 2026-11-22 主攻 overlay/screen owner：日志侧决定性实证
+
+### 新工具
+- `tools/ul_probe.py` 新增 `owner` 模式：一次性输出 Apple Logo overlay / screen-owner 交接链、
+  按 boot_uuid 分组摘要（每 boot 的 no-owner/removeOverlay 计数 + gpu15 有无）、SpringBoard 静默统计。
+
+### 实证 1：失败是确定性的，与 GPU/竞态无关
+按 `boot_uuid` 分组（`ul_fix15long2.jsonl`，107424 行 / 5 个 boot）：
+```
+BDA71D4F  14004 行  NO-gpu15  no-owner=3  removeOverlay=0
+7E7F019D  12685 行  gpu15     no-owner=3  removeOverlay=0
+7127CAB2  14805 行  gpu15     no-owner=3  removeOverlay=0
+8B465632  12597 行  NO-gpu15  no-owner=3  removeOverlay=0
+39FA7311  53333 行  gpu15     no-owner=3  removeOverlay=0   （持续到 67 s）
+```
+**每个 boot 都是 no-owner=3 / removeOverlay=0**，与 gpu15 有无无关。
+→ overlay 交接失败是**结构性、确定性**缺陷，不是竞态、不是 GPU window、不是时序问题。
+
+### 实证 2：SpringBoard 完全静默（关键）
+- `exec SpringBoard` **5 次**（11.239/14.412/14.535/15.428/19.613 s），
+  但全日志 process/image/library/subsystem/category **全字段 SpringBoard 自身日志 = 0 行**。
+- 对照：`/usr/libexec/backboardd` 17733 行，`/usr/libexec/runningboardd` 3680 行。
+- SpringBoard 连上了 system shell socket（backboardd 侧 5 次 `System shell connected ... pid 25/26`），
+  但它自己一条 unified log 都不写——**进程被 exec、socket 连上，但主初始化没有真正执行到写日志/声明
+  screen owner 的阶段**。
+- 内核侧确认 SpringBoard 二进制存在且合法：`/System/Library/CoreServices/SpringBoard.app/SpringBoard`
+  cnid 278950，112960 B Mach-O stub（`__PAGEZERO`，真身在 dyld shared cache）。
+  不是文件缺失。
+
+### 实证 3：shell 连上与 screen-owner 失败精确同刻
+每次 `System shell connected` / `systemShellChangedWithPrimary` 的同一毫秒，紧跟
+`updateOverlay: No explicit screen owner` + `addOverlay(...): Overlay pending or already`；
+`BKBootUIPresenter` activity assertion 超时 4 次。
+→ backboardd 在 shell-changed 回调里检查 explicit screen owner 失败 → 保留 Apple Logo overlay。
+
+### 实证 4：display swap_end 错误（每 boot 固定 3 条）
+`backboardd: display 2/3/4 swap_end returned error 0xFFFFFFFFE00002D7` ×15（5 boot × 3）。
+内核侧 `SWEET FB: swap wait ... -> 0x0` 显示主 display swap 成功。
+0xe00002d7 疑为 display 2/3/4 这些 secondary/不存在的 display 的正常失败，暂不作为根因，
+记录备查（见代码侧 agent 复核）。
+
+### 实证 5：镜像侧 home 配置正常；`/var/empty` 是误导线索（已排除）
+- `/private/etc/passwd` 中 mobile 用户 home = `/var/mobile`（正确），
+  `/private/var/mobile/Library/Preferences` 存在（cnid 3745），
+  `/var -> private/var` 符号链接正确（11 B 相对链接）。→ 镜像打包无问题。
+- **勘误**：日志里的 `homeDirPath starts with /var/empty` + 偏好 volatile（10 条）**只出现在
+  `mDNSResponder` / `securityd` 两个系统 daemon**，是 `containermanagerd` 给 uid=-2
+  （4294967294，"无用户"系统服务）建容器的**正常行为**，与 mobile(uid 501)/SpringBoard 无关。
+  不能当作"SpringBoard home 被重定向"的证据，此线索排除。
+
+### 实证 6：仓库零覆盖，上游不需要此处理
+- 全仓（fork + upstream-ref 共 1145+ 文件）搜 `screen owner` / `screenowner` /
+  `BKBootUIPresenter` / `removeOverlay` / `updateOverlay` / `bootUI`：
+  **除本轮新增的日志探针工具外，源码/补丁/脚本/文档零命中**。
+- upstream（README 80% 🟢、已进桌面）能正常移除 Apple Logo 却没有任何 screen-owner 处理代码
+  → 说明**上游环境里 SpringBoard 正常初始化、自动成为 screen owner，无需补丁**。
+  byron 卡点不在"缺某个 screen owner 补丁"，而在 **SpringBoard 自身没初始化完成**
+  （与实证 2 的 0 自身日志一致）。内核/XNU 侧无此逻辑，boot-arg/ADT 也无法干预。
+
+### 结论与下一步
+- 白苹果 = **SpringBoard 进程 exec 了但内部初始化没跑完**（0 自身日志），
+  因此既没声明 explicit screen owner、也没移除 Apple Logo overlay；backboardd 每 boot 都确定性地
+  保留 Apple Logo。不是崩溃循环、不是 ALS、不是 pipelinelib、不是 GPU 耗尽、不是镜像损坏、
+  不是缺补丁（上游同样无补丁但正常）。
+- 下一步（**未执行，需用户拍板 + 真机 A/B**）：
+  1. 上机抓 SpringBoard 的 crash/容器日志或反汇编其 screen-owner 声明路径（根因层，成本最高）；
+  2. 代码侧 agent 正在查 fork/upstream 是否有可复用的用户态/screen-owner 修正（见后续补充）；
+  3. `/var/empty` home 线索已排除，不作为改动方向。

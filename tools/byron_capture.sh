@@ -20,6 +20,11 @@ export MSYS_NO_PATHCONV=1
 NAME=${1:?usage: tools/byron_capture.sh NAME [MINUTES]}
 MINUTES=${2:-20}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# python3 is a Windows build here; give it native paths, not Git Bash /c/... paths.
+winp() { cygpath -w "$1" 2>/dev/null || echo "$1"; }
+PANDORA_LOG=$(winp "$ROOT/tools/pandora_log.py")
+IOSLOG_FETCH=$(winp "$ROOT/tools/ioslog_fetch.py")
+SHOT_FETCH=$(winp "$ROOT/tools/shot_fetch.py")
 ADB=${ADB:-/d/Android/platform-tools/adb.exe}
 WSL_ROOT=${WSL_ROOT:-'//wsl$/Ubuntu-24.04'}
 WSL_DISTRO=${WSL_DISTRO:-Ubuntu-24.04}
@@ -46,16 +51,19 @@ fi
 DEV=$("$ADB" shell "su -c 'readlink -f /dev/block/by-name/userdata'" 2>/dev/null | tr -d '\r')
 [[ $DEV == /dev/* ]] || { echo "bad userdata device: $DEV" >&2; exit 5; }
 echo "[1/4] kernel ring -> $OUT/kernel_ring.raw"
-"$ADB" exec-out su -c "$PHONE_PINFILE rawread $PHONE_LOG $DEV 2>/dev/null" > "$OUT/kernel_ring.raw"
-python3 "$ROOT/tools/pandora_log.py" "$OUT/kernel_ring.raw" "$OUT/kernel_ring.txt"
+# pinfile exposes rawreadat PATH DEV OFF LEN (no whole-file rawread). The log is
+# an 8 MiB pinned file; read it from offset 0. Override IOSLOG_LEN if resized.
+IOSLOG_LEN=${IOSLOG_LEN:-8388608}
+"$ADB" exec-out su -c "$PHONE_PINFILE rawreadat $PHONE_LOG $DEV 0 $IOSLOG_LEN 2>/dev/null" > "$OUT/kernel_ring.raw"
+python3 "$PANDORA_LOG" "$OUT/kernel_ring.raw" "$OUT/kernel_ring.txt"
 
 echo "[2/4] unified log archive -> $WSL_WORK/la_$NAME and ul_$NAME.jsonl"
 ADB=$ADB WSL_ROOT=$WSL_ROOT WSL_DISTRO=$WSL_DISTRO WSL_WORK=$WSL_WORK \
-  python3 "$ROOT/tools/ioslog_fetch.py" "$NAME" --minutes "$MINUTES" --parse
+  python3 "$IOSLOG_FETCH" "$NAME" --minutes "$MINUTES" --parse
 
 echo "[3/4] screenshots -> $OUT/shots"
 ADB=$ADB WSL_ROOT=$WSL_ROOT WSL_DISTRO=$WSL_DISTRO WSL_WORK=$WSL_WORK \
-  python3 "$ROOT/tools/shot_fetch.py" "$OUT/shots"
+  python3 "$SHOT_FETCH" "$OUT/shots"
 
 echo "[4/4] summary -> $OUT/summary.txt"
 LOG=$OUT/kernel_ring.txt

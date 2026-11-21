@@ -1,4 +1,10 @@
-# 17 Pro 设备树查询结果（进行中）
+# 原项目设备树查询记录（进行中）
+
+> [!NOTE]
+> 本文档是**上游来源资料**：记录的是原作者对小米17 Pro（`pandora`）设备树的查询，数据属于原项目。
+> 本仓库唯一适配目标是**小米17 Max（`byron`）**，来源见
+> [OctoDevStudios/ios-popsicle](https://github.com/OctoDevStudios/ios-popsicle)。文中 `pandora`/`17 Pro`
+> 均为上游历史标识，不是本仓库的适配机型。
 
 来源：device/pandora-live.dtb（2026-10-21 从手机 /sys/firmware/fdt 导出），查询工具 tools/dt.py。
 状态：做到一半被打断（2026-10-21），下面"未查"的还没做。

@@ -93,13 +93,34 @@ fix12 = 新内核 `535466b6` + 重采 extents（5531 段）+ fix10 boot args。�
 - fix10 及之前 extents 备份：`incoming/iosroot.json.fix10.bak`、`incoming/ioslog.json.fix10.bak`。
 - 所有镜像、日志、截图、实时 extents 均在 `incoming/` / `device/byron/extents/`，被 `.gitignore` 排除，不入库。
 
-## 下一步（fix12）
+## Metal 插件安装链路调研（2026-11-22）
 
-1. rawwrite 重写 root（进行中）+ `pinfile extents --json` 重采 `iosroot` / `ioslog`。
-2. 用新 extents + 新内核 `535466b6` 打包 payload / loader；boot args 沿用 fix10，不变。
-3. `fastboot boot` 后回安卓，用 `bash tools/byron_capture.sh fix12 20` 抓内核环、unified log 和截图。
-4. 先确认 launchd 不再 panic（dyld cache 恢复），再看 `AGXAccelerator` 是否从 `none` 变 `found`，
-   以及两行新诊断日志 `metal arg=` / `IOService::start FAILED`。
-5. 若 AGX 出现但仍卡 Logo，下一步专查登录会话链路 / Metal 插件；不要把多个变量混进同一轮。
+fix12 确认内核侧 AGX 已打通，白苹果卡点转移到用户态 Metal 插件缺失。仓库里已有完整链路：
+
+- **内核文件安装器**：内核含 `pandora_files` / `PANDORA FILES:` 字符串（`bsd/dev/pandora_files.c`）。
+  它从 pinned 的 `adspfw.img`（byron 上 8 MiB）里的 fwpack.img 读 `files.txt`，把文件装进 root。
+  fix10 / fix11 内核都含此机制，**不需要重编内核**。
+- **打包脚本**：`mac/gpu_pack.sh FWDIR` 生成 `fwpack.img` + `gpu.tc`。把
+  `NativeAdrenoMetal.bundle`（`NativeAdrenoMetal` + `Info.plist`）、`NativeAdrenoMetal.clients`、
+  `libvulkan_freedreno.dylib`、`vktest`、`mtltest`、`com.apple.backboardd.plist` 装进 root，
+  并把这些二进制的 trust cache 合并进静态模块。脚本头注释写的是 17 Pro Max，但机制通用。
+- **插件来源**：`.github/workflows/turnip.yml` 交叉编译 `NativeAdrenoMetal`（UniXNU NativeMetal
+  经 `tools/metal/adapt_ios16.py` 适配 iOS 16）和 Turnip，发布到 `turnip-ci` pre-release。
+  fork 和上游目前**都没有** `turnip-ci` release；本地 `/opt/work/gpu/turnip` 为空。
+- **硬件匹配**：byron GPU = `Adreno840v2`（DT `qcom,gpu-model`），手机有
+  `gen80200_gmu.bin` / `gen80200_sqe.fw` / `gen80200_aqe.fw`，与 gpu_pack.sh 的 gen80200 一致。
+  唯一缺口：byron **没有** `gen80200_zap.mbn`（gpu_pack.sh 必需），需确认是否可用 aqe.fw 替代或另行提取。
+
+**阻塞点：turnip CI 构建失败**（run `44882253512`，步骤 Build）：
+meson 交叉编译报 `UTIL_ARCH_LITTLE_ENDIAN unset`、`PIPE_FORMAT_RG88_UNORM undeclared`、
+`Dl_info/dladdr undeclared`（19 errors）。属工具链版本漂移导致的配置问题（cross-file 已写
+`endian = 'little'`，但新版 meson 未转成编译宏），非源码缺陷。修 `tools/turnip/build_ios.sh`
+的 cross-file / meson 配置后可重试。
+
+下一步顺序（每步单独验证，不要混在一起）：
+1. 修 turnip CI 编译配置 → 重跑 `turnip.yml` → 从 `turnip-ci` release 下载插件产物。
+2. 按 byron 固件调整 `gpu_pack.sh`（zap.mbn 缺口）→ 生成 fwpack.img + gpu.tc。
+3. rawwrite fwpack.img 到 adspfw.img 的 pinned 物理块 + 重采 adspfw extents + 重打 loader。
+4. `fastboot boot` → 内核安装器把插件装进 root → 抓日志确认 NativeAdrenoMetal.bundle 加载。
 
 全程约束：小米17 Max `byron`；不刷分区、不改 AVB、不做额外解锁。

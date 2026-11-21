@@ -308,60 +308,108 @@ SpringBoard 侧日志。下一步应聚焦拿到 SpringBoard 的实际卡点（�
 下一步看它崩溃时是否留下 `.ips` 崩溃报告（在 `/private/var/mobile/Library/Logs/CrashReporter/`，
 需从手机镜像单独抓），或对照上游 patches 中 SpringBoard 首启/激活/容器相关的处理。
 
-## 06:47–07:0x 深挖 unified log：找到白苹果循环的直接触发器（重大发现）
+## 06:47–07:11 深挖 unified log + 三方向电脑端调研（含对上段结论的重大修正）
 
 ### 新工具（只读，不入库实时数据）
 - `tools/ul_probe.py` 新增 3 个模式：`life`（exec/exit 生命周期）、`bootui`（bootUI/assert/ALS/swap）、
   `sim`（Software renderer/Simulating crash/ReportCrash 合成）。
 - 新增 `tools/ul_sb_timeline.py`：按进程名而非 pid 抓 SpringBoard 链路（**重要更正：pid 25 是
-  runningboardd，pid 26 才是 SpringBoard**，旧 `sb` 模式按 pid==25 抓错了对象，把 runningboardd
-  的日志误当 SpringBoard）。
+  runningboardd，pid 26 才是 SpringBoard**，旧 `sb` 模式按 pid==25 抓错了对象）。
 - 新增 `tools/crash_fetch.py`：只读从手机 pinned root 镜像（`adb` + `pinfile rawreadat`，经 FBE
   之下裸读）列出/dump `/private/var/mobile/Library/Logs/CrashReporter/` 的 `.ips`。
 
-### 决定性证据：CoreAnimation 主动模拟崩溃 = 重启循环触发器
-统一日志时间线（1970 纪元 = boot 相对时间）显示反复出现的固定序列：
-```
-25.712  backboardd: (CBU_ShouldWaitForALS) error: timeout waiting for ALS arrival
-25.712  backboardd: Current bootUI is an Apple Logo
-25.712  backboardd: updateOverlay: No explicit screen owner
-25.713  backboardd: CoreAnimation: Software renderer! Simulating crash!   <-- 主动模拟崩溃
-25.800  launchd: exited with exit reason (namespace: 9 code: 0xe) - OS_REASON_EXEC
-```
-`Software renderer! Simulating crash!` 共 3 次（25.713 / 29.083 / 30.465 s），每次紧跟
-launchd 的 `OS_REASON_EXEC` 退出，然后 SpringBoard/backboardd 重启（exec SpringBoard 5 次）。
-**即：backboardd 的 CoreAnimation 判定自己跑在软件渲染器上，主动模拟一次 crash 来触发重启——
-这就是"白苹果反复重启"的直接触发器**，解释了为什么每 1–4 秒 exec 一次 SpringBoard。
+### ⚠️ 对上一版"崩溃循环触发器"结论的修正（2026-11-22 07:11，作废原定性）
+上一版本段把 `Software renderer! Simulating crash!` 定性为"白苹果反复重启循环的直接触发器"。
+经逐行核对时间线 + 三方向交叉调研，**该定性作废**。三点硬反证：
+1. 那些 `launchd: exited with exit reason (namespace 9 code 0xe) OS_REASON_EXEC` 全是
+   **`xpcproxy`**（launchd 每次 launch/exec 的临时代理）的正常退出，是基线噪声，不是
+   SpringBoard/backboardd 崩溃。
+2. `Software renderer! Simulating crash!` 只有 **3 次**（25.713 / 29.083 / 30.466 s），
+   32.8 s 最后一次 `exec backboardd` 后**再无 crash**——不是无限循环。
+3. 34.5 s 起系统实际**全面启动**：`System shell connected ... SpringBoard.app` ×5、
+   `searchd: SpringBoard is unlocked`、大量 daemon 注册 activity、67 s 仍有 `PANDORA GPU IRQ`。
+   `SpringBoard started = NO`（mediaserverd ×5）经核对元数据为
+   `subsystem=com.apple.voicetrigger` 的普通 Default 日志，全文无 YES，**是语音触发框架噪声，
+   不是 SpringBoard 启动状态**。
+→ **系统并没有"起不来"，而是起来了、已解锁，但屏幕停在 Apple Logo。**
 
-### GPU 状态的关键矛盾（内核日志 vs 统一日志）
-- **内核环日志 fix15long**（第一次启动）GPU 是通的：14.898s `AGXAccelerator client 0 opened`,
-  `open AGX type 16711 -> 0x0`；25.57s `pipeline_libraries_made +33`、`pipelines_linked +17`、
-  `shader_modules_made +21`、`Autotune sysmem 11`、`command_buffers_submitted +20`——真实渲染发生。
-- **但统一日志 fix15long2**（后续重启周期）显示 GPU 重新初始化时失败：
-  - 27.783s `tu_device.cc:1752: cannot generate UUID (VK_ERROR_INITIALIZATION_FAILED)`
-    （注意：**UUID 修复在第一次 boot 生效了**——内核日志里第一次没有此错；这是重启后的新实例）
-  - 27.783s / 28.614s `native-metal: device refused: Vulkan(VkResultCode(-3))`
-  - 28.614s `tu_knl_darwin.cc:130 IOServiceOpen(IOAcceleratorES,0x4147) failed: 0xe00002d8`
-    （0xe00002d8 = kIOReturnNoResources / GPU client window 耗尽）
-- **综合判断**：第一次 SpringBoard/backboardd 起来时 GPU 正常、渲染发生，但 CoreAnimation 在
-  bootUI 阶段仍判定"软件渲染"（可能因 `pandora-metal refused: no pipeline library:
-  default.pipelinelib` 预编译管线库缺失，QuartzCore 回退到现场编译 / 软件路径），于是主动
-  `Simulating crash` → 重启；重启后 GPU client window 未及时释放，Vulkan 设备初始化失败，
-  形成"软件渲染→crash→重启→GPU 耗尽"的恶性循环。这与"等 30 分钟 lsd 就能进桌面"假设被
-  fix15long 证伪一致——根因不是慢，是**循环重启**。
+### 真正的卡点：Apple Logo overlay 从未被移除（呈现/屏幕归属层，非渲染能力）
+- 全日志 `removeOverlay` = **0**；`Current bootUI is an Apple Logo` 与
+  `Presenting overlay: <BKDisplayRenderOverlayAppleLogo level -1/2999>` 反复出现；
+  `updateOverlay: No explicit screen owner` **15 次**；
+  `system activity assertion timed out: BKBootUIPresenter` **4 次**。
+- 34.564 s backboardd 明说 `Enabling framebuffer changes on display (1) because we don't have
+  any overlays that require disabled updates`，随后立刻又 `Presenting overlay: AppleLogo` →
+  `updateOverlay: No explicit screen owner` → `addOverlay waiting for activity assertion`
+  （assertion 实际 0.0005 s 就拿到，并非卡在 assertion）。
+- **判断**：SpringBoard 进程已连上 shell、已解锁，但没成为 explicit screen owner，
+  BKBootUIPresenter 的 assertion 超时，backboardd 因此不移除 Apple Logo overlay。
+  这是 backboardd ↔ SpringBoard 的**纯用户态角色协商**，全部 XNU 补丁无内核侧处理，
+  boot-arg/ADT 都无法直接让 SpringBoard 声明 started 或设置 screen owner。
+  证据等级：现象中高；"为何没成为 screen owner"低（SpringBoard 自身日志为 0）。
 
 ### 崩溃报告侧（只读抓取结果）
 `crash_fetch.py` 从 pinned root 镜像列出 `/private/var/mobile/Library/Logs/CrashReporter/`
-共 76 个 `.ips`，**全部是 `bluetoothd` / `fairplayd.H2`**（`sweetnoexec` 基线里每 10 s 被 SIGKILL
-的进程），**没有 SpringBoard / backboardd / kernel 的崩溃报告**。再次印证 SpringBoard 是
-"Simulating crash 后主动 exit"，不是被 watchdog/jetsam 杀死或产生真实 crash dump。
+共 76 个 `.ips`，**全部是 `bluetoothd` / `fairplayd.H2`**（`sweetnoexec` 基线里被 SIGKILL
+的进程），**没有 SpringBoard / backboardd / kernel 的崩溃报告**——无真实 crash dump。
 
-### 下一步（三个候选方向，未擅改）
-1. **消掉 `Software renderer` 判定**：查 `pandora-metal refused: no pipeline library:
-   default.pipelinelib`——把预编译 pipeline library 放进 root，或让 QuartzCore 不因缺该库回退
-   到软件渲染路径（对照上游 EXPERIENCE 的 Metal/plugin 部分，byron 未验证，需真机逐项做）。
-2. **修 GPU client window 耗尽**：重启后 `IOServiceOpen 0xe00002d8`，查内核 `0xe00002d8` 来源
-   与 client 释放路径（可能需 kernel patch + CI 重编，耗时长）。
-3. **绕开 bootUI 的 ALS 等待**：`(CBU_ShouldWaitForALS) timeout waiting for ALS arrival` 后
-   才走到 Simulating crash，查能否用 boot-arg/ADT 让设备声明 ALS 可用或跳过该等待。
-优先级建议 1 > 3 > 2（1 可能一处修复即打破循环；2 需重编内核成本最高）。
+### 三方向电脑端调研结论（07:0x–07:11，均未改文件、未动真机）
+
+#### 方向1 — Software renderer / `default.pipelinelib`：**pipelinelib 不是诱因**
+- **否证** pipelinelib 缺失假设：HFS 直读证实 `/System/Library/Frameworks/QuartzCore.framework/
+  default.pipelinelib` 存在且完整（functions / pipelines.desc / pipelines.g4–g15）。
+  `docs/GPU_PLAN.md:37,162`：该库是 AGX 机器码用不上；设备名不认识时 QuartzCore 自动回退
+  AIR 现场编译（苹果自己的虚拟机也走这条路）。内核日志 `pipeline_libraries_made +33`、
+  `pipelines_linked +17`、`command_buffers_submitted +20` 证明回退后真实渲染发生。
+- **判定来源（强推断）**：3 次 `Software renderer! Simulating crash!` 与内核
+  `IOK backboardd: open AGXAccelerator type 1 -> 0xe00002c7 (kIOReturnUnsupported)`
+  **时间戳 3/3 精确对齐**。该条 UnifiedLog 元数据 `subsystem=com.apple.coreanimation` /
+  `category=WindowServer` / `library=QuartzCore.framework` / `message_flags=[SharedCache,...]`，
+  是系统原生字符串非注入。返回点 `xnu/patches/0184-pandora-gpu-metal-accelerator.patch:25`
+  `if (type != PANDORA_GPU_OPEN_TYPE=0x4147) return kIOReturnUnsupported;`，
+  运行时源码 `wsl/PandoraAdrenoGpu.cpp:550-551`。
+- type=1 与 0x4147 **共用同一 AGXDeviceUserClient 与 struct-in/struct-out ABI**
+  （`PandoraAdrenoGpu.cpp:586-644`、`:389-415`），接口本身兼容；风险是 CA 可能按 Apple
+  原生 AGX ABI 发 externalMethod（selector 编号语义不同）被误当 method number。
+- **下一步（未做）**：方案 A 先补 `docs/GPU_PLAN.md:171` 列的 4 个未实现能力查询
+  （`isMsaa32bSupported` / `isFloat32FilteringSupported` / `supportsASTCTextureCompression` /
+  `supportsBCTextureCompression`），看 crash 是否消失；方案 B 才让 type=1 通过并加 selector 日志。
+  **验收指标是 Simulating crash 是否消失、type=1 是否仍返回 0xe00002c7，不是 overlay/started
+  （二者已被证伪为非因果）。**
+
+#### 方向2 — ALS 等待：**非致命，正式结案**
+- **直证**：`ALS sync ready in 0.00179s`（25.714）在 timeout（25.712）后仅 2 ms 完成；
+  `ALS is not supported on this device -> ignore DisplayBrightnessAuto` 是正常降级分支；
+  `overall 5.274s` 吻合上游 `EXPERIENCE.md:42` 已知"等 ALS ~5 s 超时"常态，上游照样进桌面。
+- 无 boot-arg / ADT override 可跳过（`CBU_ShouldWaitForALS` 不在任何源码/补丁，是闭源 backboardd
+  逻辑；ADT 白名单仅 10 个数值键，加 ALS 节点还需 IOKit personality = 内核改动）。
+  `wdt=-1` / `BKNoWatchdogs` / `wdt_test=no_user_checkin` byron 已全部具备。
+- ALS 与 crash 的 1 ms 相邻是同阶段独立事件非因果（ALS 25.714 才 sync ready，crash 25.713 已发生）。
+- **结论：ALS 非根因（高置信），不作为改动目标。**
+
+#### 方向3 — GPU "client window 耗尽"：**不成立，是 boot-arg 注入问题**
+- **勘误**：`0xe00002d8` = **`kIOReturnNotReady`**（`IOReturn.h` `iokit_common_err(0x2d8)`），
+  **不是** kIOReturnNoResources（0xe00002be），更不是"window 耗尽"。直接来源
+  `wsl/PandoraAdrenoGpu.cpp:553-556`：`pandora_gpu_open()` 返回 -1 时
+  `IOLog("... open refused (GPU not up or no free window)")` + `return kIOReturnNotReady`
+  ——把 `!gpu_ready` 和"窗口满"合并成同一条模糊日志，是误判来源。
+- 全日志 `open refused` 仅 1 次（28.614 s）；5 次成功的 type 16711 open **全是 client 0 且每次
+  紧跟 `client 0 closed`**，从未出现 client 1..14，`GPU_MAX_CLIENTS=15` 从未占满。
+- **真正原因**：`pandora_gpu.c:4030-4037` `pandora_gpu_init()` 读 boot-arg `pandora_gpu=N`，
+  `N<=0 直接 return` → GPU hw_init 不跑 → `gpu_ready=false`。逐 boot 核对：5 个 boot 中
+  BDA71D4F(24.581s)、8B465632(28.584s) **缺 `pandora_gpu=15`**，正好对应 25.7 s 第一次 crash
+  与 28.614 s open refused；其余含该参数则 GPU 正常。
+- 后期 GPU 完全正常（32.793 s `client 0 opened -> 0x0`、34.569 s GPU IRQ），
+  **0xe00002d8 是早期瞬态、不致命**。不需要 kernel patch + CI 重编修"耗尽"（该问题不存在）。
+- **勘误（dir1 撤回两条附带推断）**：`gpu 0` 不是 CPU 渲染指标——`gpuFrame=true` 唯一置位在
+  `0096-fuxi-adreno.patch:2911-2918` 的 `#if defined(FUXI)` 内，byron 是 PANDORA 平台该段不编译，
+  `gpuFrame` 结构性恒 false；`pandora_gpu_metal=1` 5/5 boot 均存在，"依赖不一致"担心不成立。
+
+### 下一步建议（修正后）
+1. **主攻 overlay / screen owner 交接**（真正卡点）：查 `No explicit screen owner` 与
+   `BKBootUIPresenter` assertion 超时的触发条件，为何 SpringBoard shell 连上且解锁却没成为
+   explicit screen owner。纯用户态，需反汇编/符号化或对照上游；无现成 boot-arg/ADT。
+2. **次攻方向1 方案 A**（低成本、插件层）：补 4 个 MTLDevice 能力查询答案，验证 Simulating
+   crash 是否消失。与 overlay 是两条**独立线**，不可互相作为验收指标。
+3. **低成本附带**：修 `pandora_gpu=15` boot-arg 注入稳定性，消除早期 open refused 瞬态。
+4. **结案不做**：ALS 方向、pipelinelib 拷贝、"窗口耗尽"内核 patch + 重编。

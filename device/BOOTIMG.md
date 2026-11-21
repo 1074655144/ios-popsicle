@@ -1,4 +1,10 @@
-# 17 Pro 原版启动镜像分析（2026-10-22）
+# 原项目启动镜像分析记录（2026-10-22）
+
+> [!NOTE]
+> 本文档是**上游来源资料**：记录的是 fork 之前、原作者对小米17 Pro（`pandora`）启动镜像的分析，
+> 数据属于原项目。本仓库唯一适配目标是**小米17 Max（`byron`）**，来源见
+> [OctoDevStudios/ios-popsicle](https://github.com/OctoDevStudios/ios-popsicle)。文中 `pandora`/`17 Pro`
+> 均为上游历史标识，不是本仓库的适配机型。
 
 来源：backup/sde.img（已整体哈希校验）里按分区表截出的 B 槽分区，存在 device/stock/。
 工具：tools/gptextract.py（读分区表、截分区）、tools/bootimg_info.py（解析头部）。

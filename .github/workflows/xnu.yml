@@ -19,7 +19,7 @@ on:
 
 concurrency:
   group: xnu-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   DXB_REPO: https://github.com/blacktop/darwin-xnu-build

@@ -589,3 +589,40 @@ dump 镜像内 plist（check_owner.py --cat）确认：
 - 真机 A/B（低优先，需用户在场）：若要继续验证"DA 判定源"假设，方向是 buddy-done 通知 marker，
   而非 owner/mode；但收益低、成本高（上次 boot 已证实系统确定性停在 buddy），**建议先搁置**。
 - 不要做（沿用上一轮）：改 0184 / boot args / swap_end / 重做 ALS/pipelinelib/窗口耗尽。
+
+## 2026-11-22 对照上游：别人是怎么跳过首启 / 验证进桌面的（只读研究，未改内核/镜像）
+
+用户要求"看别人怎么做"。读了 fork/upstream-ref 的 `docs/EXPERIENCE.md`、`SWEET_LESSONS.md`、
+`device/DT_FINDINGS.md`，并联网核对三个源头项目（ios-sweet / data-a-live / ios-fuxi）的 README。
+结论：**我们没有缺任何"进桌面"的补丁或开关，反而发现一个更可靠的验证方向。**
+
+### 上游做法逐条对照
+| 环节 | 上游怎么做 | byron 现状 | 是否差异 |
+|---|---|---|---|
+| 跳过 Setup Assistant / buddy | `sweet-root-tweaks.py` 写配置文件（SetupDone 等） | 同一脚本、同一逻辑，镜像实测写对（见上节） | **一致，非差异** |
+| 激活 | seed data_ark 激活状态 | 同一脚本，已写 | 一致 |
+| 首次开机 root 可写 | boot args 带 `ufsrw=1 rootrw=1`（HFS+ 日志区首次可写挂载才初始化） | `ios_test.sh BASE` 已含 | 一致 |
+| 首次 lsd 重建慢 | 上游说白苹果停 25 分钟正常 | 长测 30 分钟仍白苹果，已证伪 | 上游经验不适用 |
+| GPU/Metal | Turnip + NativeMetal 插件 + metal2vulkan | fork 与 upstream 366 个补丁完全相同、boot args 一字不差 | 一致 |
+| 验证进桌面 | `pandora_selftest` / `pandora_autoswipe`（开机自动按键上滑翻页，无人值守） | 补丁 0142/0224 + 源码都在内核里 | **一致，机制已具备** |
+
+### 决定性对照证据（此前被忽略）
+`device/DT_FINDINGS.md:119`（2026-10-22，补丁 0128–0142，t17–t19）：内核自检通过
+`sweet_hid_touch` 从底边上滑，**iOS 真实进入了主屏幕**（小组件/图标/Dock），下拉开了控制中心，
+亮度滑块拖动生效。`pandora_autoswipe.c` 注释同样写明测试机无密码、backboardd 约 20 s 出首帧。
+→ **10 月这套系统（无 GPU/Metal）能完整进桌面、过 buddy、声明 screen owner。**
+→ 11 月 fix14/15 打通 GPU/Metal 后反而白苹果。结合上三节（owner/mode 正确、偏好被读取、
+不同进程 buddy 判定相反），白苹果更可能是 **GPU/渲染链路影响 SpringBoard 首帧/屏幕接管**，
+而不是 buddy 偏好未加载。证据等级：中（对照成立，但缺当次 GPU boot 的桌面判定实测）。
+
+### 下一步：低成本真机 A/B（无需重编内核/镜像，需用户在场）
+用现有 fix15 全成果 loader（`loader-boot.img`，含 autoswipe 补丁）+ 在 boot args 追加
+`pandora_autoswipe=SECS`（例如 90），长测一次并抓缩略图/截图：
+- 若自动上滑后能翻动主屏幕 → 系统其实已进桌面，问题只在 **Apple Logo overlay 没移除**（显示层）；
+- 若上滑完全无反应 → SpringBoard 确实卡在首启（回到 buddy 方向）。
+该 A/B 直接区分"显示层 vs 用户态卡死"两个根因分支，比改 owner/mode 或 buddy 偏好更有判别力，
+且不改任何镜像/内核。另可对比：同一 loader 去掉 GPU 参数（纯 CPU 渲染）跑 autoswipe，
+看是否重现 10 月进桌面结果，以验证"GPU 引入回归"假设。
+
+### 落盘
+- 仅追加本文档；无内核/镜像/工具改动，无实时数据入库。

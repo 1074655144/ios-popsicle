@@ -484,3 +484,55 @@ BDA71D4F  14004 行  NO-gpu15  no-owner=3  removeOverlay=0
   1. 上机抓 SpringBoard 的 crash/容器日志或反汇编其 screen-owner 声明路径（根因层，成本最高）；
   2. 代码侧 agent 正在查 fork/upstream 是否有可复用的用户态/screen-owner 修正（见后续补充）；
   3. `/var/empty` home 线索已排除，不作为改动方向。
+
+## 2026-11-22 收尾：首启 buddy 状态未跳过（根因方向收敛，实证矛盾）
+
+### 新实证：系统每 boot 确定性认为"仍在首启"
+核实 `ul_fix15long2.jsonl`（agent 报告 + 我逐条复核）：
+- `remindd: DAAgentManager: Device PastBuddy is 0` ×10（5 boot ×2）；
+- `remindd: RDAccountInitializer: We are still in buddy` + `Can't start yet, device is still in buddy` ×15（5 boot ×3）；
+- `backboardd: First boot: systemShellWillBootstrap` ×5（每 boot 一次）——与 `System shell connected` 同刻。
+→ **每个 boot 都确定性地处于"首启 / Setup Assistant（buddy）未完成"状态**，
+这是 SpringBoard 不成为 explicit screen owner、overlay 不移除的上游原因。
+
+### 决定性矛盾：跳过首启的偏好在镜像里写得正确，但运行时没生效
+用 HFS 只读解析 `/opt/work/iosroot.img` 核实 `tools/imgbuild/sweet-root-tweaks.py` 的产出：
+```
+/private/var/mobile/Library/Preferences/com.apple.purplebuddy.plist (130 B):
+    SetupDone=True, SetupFinishedAllSteps=True, SetupVersion=11
+/private/var/mobile/Library/Preferences/com.apple.migration.plist (145 B):
+    LastSystemVersion=20H392
+com.apple.purplebuddy.notbackedup.plist (257 B) 存在；springboard.plist (171 B) 存在
+（activation() 另在 mobileactivationd 容器写 data_ark.plist: -ActivationState=Activated）
+```
+即 `sweet-root-tweaks.py:57-61` 的 `merge_pref` **确实把跳过首启的偏好写进了镜像**。
+但运行时 `Device PastBuddy is 0` / `still in buddy` 每 boot 复现，全日志搜 `SetupDone` /
+`ActivationState` / `DataMigration` 命中 **0**（没有任何进程读到/提到这些键）。
+→ **"镜像写了、运行时没读到"是实证矛盾**：根因方向从"SpringBoard 静默"收敛为
+**首启跳过偏好未被 cfprefsd / DA 框架加载**（可能 owner/mode、偏好域路径或 container 解析问题）。
+这是可动手的明确方向，但具体是哪一环失效，静态材料无法确定，需上机 A/B。
+
+### 勘误（更正 agent 报告的一处归因）
+agent 把 `/var/empty` → volatile prefs 当作"偏好未生效"的根因证据；我已核实那 10 条
+`homeDirPath starts with /var/empty` **只来自 mDNSResponder/securityd 系统 daemon（uid=-2）的正常容器行为**，
+与 mobile(501)/SpringBoard 无关。但"偏好未生效"本身由上面**镜像文件正确 vs 运行时 buddy=0 的直接矛盾**
+独立成立，不依赖 `/var/empty` 那条。两条要分开看。
+
+### swap_end 定性（agent 复核，采纳）
+`0xe00002d7 = kIOReturnOffline`（非 NotReady）。内核 `IOMobileFramebufferCreateDisplayList: FB Count = 1`
+（×60），display 2/3/4 mode=(0x0) 无有效模式，是 backboardd 枚举的虚拟/占位屏；
+`mkadt_pandora.py` 只生成 1 个 disp0 节点。swap_end Offline 是良性预期，**与 overlay 无因果，不追**。
+
+### 新的下游症状（功能层确证 owner 缺失）
+`no client connection for port 0x4xxx` 共 10973 条（39FA boot 9894 / 7127 boot 1069），
+紧跟 `SWEET HID: touch ... down` —— 内核触摸事件到了，backboardd 找不到 client 连接投递。
+端口名每 boot 不同（动态 Mach port）。这是"无 screen owner / HID client 未注册"的功能层表征，
+把 owner 缺失从一条日志升级为"屏幕既不能接管、也不能收输入"的实证。
+
+### 证据等级与下一步（未执行，需上机 A/B）
+- 实证：buddy 状态每 boot=0、镜像偏好写得正确、运行时未读到、FB Count=1、触摸投递无主。
+- 强推断（因果未证）：首启偏好未加载 → SpringBoard 停在 buddy 初始化 → 不声明 screen owner
+  → overlay 不移除 + 自身日志 0 行。
+- 最小 A/B（低优先先做）：核对/修正 mobile(501) home 与 Preferences 目录 owner/mode，重建镜像跑一次；
+  验收指标：`Device PastBuddy` 是否变 1、`still in buddy` 是否消失、`removeOverlay` 是否 >0。
+- 不要做：改 0184 / boot args / swap_end / 重做 ALS/pipelinelib/窗口耗尽（均与本卡点无因果）。

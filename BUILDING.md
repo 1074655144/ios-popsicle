@@ -1,6 +1,11 @@
 # Building
 
-Requirements: a Xiaomi 17 Pro Max with an unlocked bootloader and root under Android, a Mac with `adb` and `fastboot`, and your own iPhone X iOS 16.7.16 IPSW. None of Apple's, Qualcomm's or Xiaomi's files are distributed here.
+> **适配机型 / Target device**：本仓库唯一目标为 **小米17 Max（`byron`）**。小米17 系列有多款后缀型号（小米17 / 17 Pro / 17 Pro Max / 17 Max），本文只针对小米17 Max。
+> **来源 / Upstream**：fork 自 [OctoDevStudios/ios-popsicle](https://github.com/OctoDevStudios/ios-popsicle)（原适配小米17 Pro Max / `popsicle`）。下文出现的 `popsicle` / `PANDORA`  machine config 名称是上游遗留的技术标识，不代表适配机型已改变。
+
+Requirements: a **Xiaomi 17 Max (`byron`)** with an unlocked bootloader and root under Android, a Mac (or a GitHub Actions fork — see `docs/byron/CI_KERNEL_BUILD.md`) with `adb` and `fastboot`, and your own **iPhone X iOS 16.7.16 (20H392) IPSW** — `iPhone10,3,iPhone10,6_16.7.16_20H392_Restore.ipsw`, SHA256 `ece1194f7e233e9109c5790a8d23a4564a10a254e15ec5b09978a343265568fb`. None of Apple's, Qualcomm's or Xiaomi's files are distributed here.
+
+> **Target iOS version — 16.7.16 (20H392), the project-native build.** The user briefly chose 16.5 on 2026-11-21 but reverted: 16.5's cryptex/trustcache layout uses different build numbers (`096-xxx-xxx`) and is not covered by the project's tested flow. 16.7.16's IPSW has been verified locally against the official SHA256 and is still signed by Apple. To regenerate the build-specific asset names from your IPSW, run `python3 -I tools/port/discover_ipsw_assets.py <your.ipsw> --verify-sha256 ece1194f... -o device/byron/ipsw_assets.env` (it reads `BuildManifest.plist`); all build scripts source that file, falling back to the 16.7.16 names with a warning if absent. Target build is also recorded in `profiles/byron.env`.
 
 ## 1. Kernel
 

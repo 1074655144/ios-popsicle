@@ -118,7 +118,7 @@ meson 在 macOS host 探测到 `HAVE_ENDIAN_H=1`，但实际用 iOS SDK 编译�
 → `u_endian.h` 字节序宏未定义 → 连带字节序依赖的 PIPE_FORMAT 别名和 dladdr 分支全崩。
 修复：`tools/turnip/build_ios.sh` 的编译参数注入 arm64 恒定小端宏
 `-DUTIL_ARCH_LITTLE_ENDIAN=1 -DUTIL_ARCH_BIG_ENDIAN=0`，并对编译单元 `-include dlfcn.h`；
-链接参数保持不变。纯编译配置，不改源码。重跑 run `44924717465`（head `73799a0`）进行中。
+链接参数保持不变。纯编译配置，不改源码。重跑 run `44924717465`（head `73799a0`）在 2026-11-22 复查时确认**僵死**：该 run 的 Build 步骤从 `16:31:42Z` 起 `in_progress` 超过 8 小时，`updated_at` 一直停在 `16:30:59Z`，步骤自身的 20 min / job 的 90 min 超时都没触发，说明 macOS runner 失联（同一流程健康时约 3 min 即报错）。GitHub API 显示 Build 之前的 checkout/Deps/Sources 都 success，只有 Build 卡住，后续 Summary/Pre-release/Metal 全 pending，`turnip-ci` release 不存在。已通过 `workflow_dispatch` 重新触发新 run `44925174949`（head `76d96bd3`，含 turnip 修复固件路径两处提交），新 run 正常推进（Deps → Sources → Build），后台监控中。旧 run 因并发组 `cancel-in-progress: true` 会被新 run 取代。
 
 **CI 一次成功即可拿到全部插件产物**：turnip.yml 先构建 Turnip（`libvulkan_freedreno.dylib`
 + `vktest`）并发布 `turnip-ci` pre-release；随后 `continue-on-error` 的 Metal plugin 步骤构建
@@ -129,7 +129,7 @@ meson 在 macOS host 探测到 `HAVE_ENDIAN_H=1`，但实际用 iOS SDK 编译�
 插件二进制从 release 下载后 fwpack.img 打包可在本机完成，无需 macOS。
 
 下一步顺序（每步单独验证，不要混在一起）：
-1. 等 run `44924717465`：先确认 Turnip 的 Build + Pre-release 成功，再确认 Metal plugin 成功。
+1. 等新 run `44925174949`（旧的 `44924717465` 已判定僵死并被取代）：先确认 Turnip 的 Build + Pre-release 成功，再确认 Metal plugin 成功。
 2. 从 `turnip-ci` release 下载 6 个文件（libvulkan_freedreno.dylib / vktest / NativeAdrenoMetal /
    NativeAdrenoMetal.Info.plist / mtltest / SHA256SUMS*.metal）到 `/opt/work/gpu/turnip`，校验 SHA256。
 3. 从手机 pull 三个 gen80200 固件（gmu/sqe 在 vendor，zap 在 odm）到 FWDIR，跑 `gpu_pack.sh`

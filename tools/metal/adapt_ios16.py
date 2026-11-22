@@ -1383,3 +1383,35 @@ extern "C" size_t native_bridge_metal_pandora_work(char *out,size_t size) {
 }
 ''')
 print('added the work counts to the report')
+
+# byron: QuartzCore/CoreImage ask the render server for these six device capabilities. The pinned bridge
+# has no answers, so backboardd logs "no device answer: gpuCoreCount / ..." and CI/QC take a path that
+# leaves widget and wallpaper layers undrawn (white tiles / black background). Answer them with this
+# device's real capabilities. GPU_PLAN.md:172 requires fixing these before a real boot; ios-fuxi's N1
+# leaves them out too. A boot arg pandora_devcaps=KEY=VAL overrides each so one cloud build can be A/B'd
+# on the phone without recompiling (e.g. pandora_devcaps=gpuCoreCount=4,isLargeMRTSupported=1).
+edit('NativeBridgeMetalFrontend.mm',
+     '- (uint64_t)sharedMemorySize {return [NSProcessInfo processInfo].physicalMemory;}\n',
+     r'''- (uint64_t)sharedMemorySize {return [NSProcessInfo processInfo].physicalMemory;}
+static uint64_t byronDevCap(const char *key,uint64_t fallback) {
+ static NSMutableDictionary *caps;
+ static dispatch_once_t once;
+ dispatch_once(&once,^{
+  caps=[NSMutableDictionary dictionary];
+  char args[1024]={};size_t size=sizeof args-1;
+  if(sysctlbyname("kern.bootargs",args,&size,nullptr,0)==0)
+   if(char *at=strstr(args,"pandora_devcaps="))
+    for(char *tok=strtok(at+16," ");tok;tok=strtok(nullptr," "))
+     if(char *eq=strchr(tok,'='))*eq=0,caps[@(tok)]=@(strtoull(eq+1,nullptr,0));
+ });
+ NSNumber *v=caps[@(key)];return v?v.unsignedLongLongValue:fallback;
+}
+// Adreno 840: 3 shards, 18 MiB GMEM (GPU_PLAN.md). Metal 3-tier limits: 16 KiB threadgroup memory.
+- (NSUInteger)gpuCoreCount {return (NSUInteger)byronDevCap("gpuCoreCount",3);}
+- (NSUInteger)maxVertexAmplificationCount {return (NSUInteger)byronDevCap("maxVertexAmplificationCount",1);}
+- (NSUInteger)maxComputeThreadgroupMemory {return (NSUInteger)byronDevCap("maxComputeThreadgroupMemory",16384);}
+- (BOOL)isLargeMRTSupported {return (BOOL)byronDevCap("isLargeMRTSupported",0);}
+- (BOOL)supportsComputeCompressedTextureWrite {return (BOOL)byronDevCap("supportsComputeCompressedTextureWrite",0);}
+- (BOOL)supportsConditionalLoadStore {return (BOOL)byronDevCap("supportsConditionalLoadStore",0);}
+''')
+print('added the six device capability answers')

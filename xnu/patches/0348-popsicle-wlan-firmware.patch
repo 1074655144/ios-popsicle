@@ -80,7 +80,7 @@ xnu 0348: Wi-Fi firmware through MHI (BHI, READY, M0, BHIe, polled), SMMU pass-t
 +		const unsigned npage = 1u << (((SR(0x24) >> 28) & 7) + 1);
 +		if (nbanks && slot != nsmr) {
 +			const unsigned last = nbanks - 1;
-+			SR((numpage + last) * pg) = 0;			/* SCTLR: translation off */
++			SR((npage + last) * pg) = 0;			/* SCTLR: translation off */
 +			SR(pg + 4 * last) = 0x10000u;			/* CBAR: bypass */
 +			__asm__ volatile ("dsb sy" ::: "memory");
 +			s2cr = (uint32_t)last;				/* type 0 (translating), bank = last */

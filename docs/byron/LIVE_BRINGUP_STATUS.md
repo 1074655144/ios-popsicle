@@ -821,3 +821,38 @@ iOS 完整合成 + 一系列守护进程逐个修复（SWEET_LESSONS 第19条：
 "首启完成/设置向导跳过"状态缺失，需要逐项 diff 两份 root 的 /private/var 与 plist，
 而非继续改内核或 boot args。此方向需要上游完整的 ios-fuxi 镜像构建脚本与成品 root，
 不在当前 upstream-ref 快照内。
+
+## 2026-11-22 10:xx 社区对照：skip-setup 完整方案核验 + 长等待窗口 A/B
+
+用户提出"社区里应该有人做过"。查到两个权威公开实现，逐项比对我方镜像：
+
+### 资料来源（只读，未下载任何 Apple 镜像/密钥）
+- `dipa-studio/ios-sweet`（Redmi Note 10 Pro，iOS 16.7.16/20H392 进主屏幕）：
+  `tools/sweet-root-tweaks.py` 与我方 `tools/imgbuild/sweet-root-tweaks.py` **逐字一致**。
+  其 README 明确："首次启动 Apple 标志停留约 4–5 分钟，随后出现锁屏。"
+- `UniXNU`（github.com/UniXNU/UniXNU）`scripts/seed-data-skip-setup.py` +
+  `docs/zh/guide/skip-setup.md`：完整的 "Data seed 写入前把 Setup 标记为已完成" 方案，
+  与 ios-sweet 同源（脚本注释明确致谢 ios-sweet）。列出 5 组偏好 + 4 个容器目录 +
+  4 个 /chosen 安全状态属性的完整清单。
+- `everettjf/pixel6ios`：Pixel 6 上 HFSX root + 临时 fastboot boot 进主屏幕，
+  同样无 nextsession.kb、`FAILED to Set Foreground ID` 仍可进桌面（再次佐证该 warning 无害）。
+
+### 只读核验结果（`tools/imgbuild/audit_skip_setup.py`，新增）
+对 `/opt/work/iosroot.img` 用 HFS catalog 只读遍历，逐项核对：
+- `com.apple.migration`: LastSystemVersion=20H392, DMUserDataDisposition.buildVersion=20H392 ✅
+- `com.apple.springboard`: BKNoWatchdogs / FBLaunchWatchdogExceptions / MCForceShowCloudConfigurationUI ✅
+  （缺 SBDisableAutoDim 等 3 键——那是 `--no-auto-dim` 可选防息屏，ios-sweet 未写也能进桌面）
+- `com.apple.purplebuddy`: SetupDone/SetupFinishedAllSteps/SetupVersion=11/daemonizeNeedsToRun=False ✅
+- `com.apple.purplebuddy.notbackedup`: 7 个 mini-buddy 标志全 False ✅
+- `com.apple.managedconfiguration.notbackedup`: LockdownActivationIndicatesCloudConfigurationAvailable=False ✅
+- 4 个容器目录、launchd 7×_PanicOnCrasX + 2×CommCenter 移除、data_ark 全部就位 ✅
+构建日志 `/opt/work/imgbuild.log:13-28` 也证实 tweaks 全部成功执行。
+**结论：静态 skip-setup 状态与已进桌面的上游一致，不存在可补的缺失项。**
+
+### 长等待窗口 A/B（longwait1）
+既然静态状态齐全，唯一未验证变量是"等待时间"：上游要 4–5 分钟，而此前
+`pandora_reboot_after=240`（正好 4 分钟）且每次 180 s 就手动重启，
+`still in buddy` 只是启动 14 s 的瞬时快照（unified log 只持久化前 14 s）。
+重建 payload 把 reboot_after 拉到 600 s、fbdump 300 s，用 WSL 交叉工具链
+完整重建 loader（非 repack，边界正确），`fastboot boot` OKAY（byron）。
+用户实测等到 6 分钟以上：**仍全程白苹果**。等待不足假设排除。

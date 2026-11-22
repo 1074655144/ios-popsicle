@@ -30,7 +30,7 @@ Normal testing writes nothing to the phone's partitions. The kernel starts with 
 
 ## Status
 
-Below is the status of the Xiaomi 17 Max (`byron`) real device. The component names follow the original author's wording. Progress percentages and status colors are adjusted to what has actually been done on byron: 🟢 works · 🟡 partly works · 🟠 in progress · ⚪ not started. A note of **还没有做** means the item has not been done on byron. See **[docs/byron/LIVE_BRINGUP_STATUS.md](docs/byron/LIVE_BRINGUP_STATUS.md)** for the current RAM-boot evidence and **[docs/byron/PHASE_CLOSEOUT.md](docs/byron/PHASE_CLOSEOUT.md)** for the earlier phase closeout.
+Below is the status of the Xiaomi 17 Max (`byron`) real device. The component names follow the original author's wording. Progress percentages and status colors are adjusted to what has actually been done on byron: 🟢 works · 🟡 partly works · 🟠 in progress · ⚪ not started. A note of **还没有做** means the item has not been done on byron. See **[docs/byron/LIVE_BRINGUP_STATUS.md](docs/byron/LIVE_BRINGUP_STATUS.md)** for the current RAM-boot evidence, **[docs/byron/OTHER_DEVICES_FINDINGS.md](docs/byron/OTHER_DEVICES_FINDINGS.md)** for the other-device comparison, and **[docs/byron/PHASE_CLOSEOUT.md](docs/byron/PHASE_CLOSEOUT.md)** for the earlier phase closeout.
 
 Reusable per-phone capture/build/log steps are in **[docs/PHONE_DATA_CAPTURE.md](docs/PHONE_DATA_CAPTURE.md)**. Real-time phone data (extents, logs, screenshots, images) is intentionally not committed.
 
@@ -38,9 +38,9 @@ Reusable per-phone capture/build/log steps are in **[docs/PHONE_DATA_CAPTURE.md]
 
 | Component | Progress | Status | Notes |
 |---|---|---|---|
-| Boot, lock screen, home screen, built-in apps | `██░░░░░░░░` 20% | 🟠 | RAM 启动到白苹果；锁屏/桌面/内置应用还没有做 |
-| Touch, power and volume buttons, brightness | `░░░░░░░░░░` 0% | ⚪ | 还没有做 |
-| Display and GPU (Adreno 840, Metal) | `███░░░░░░░` 30% | 🟡 | 还没有做 GPU/Metal；目前只有 framebuffer/背光 |
+| Boot, lock screen, home screen, built-in apps | `██░░░░░░░░` 20% | 🟠 | RAM 启动到白苹果；SpringBoard 重启循环 6 次、无 screen owner；锁屏/桌面/内置应用还没有做。GPU 已证伪非原因（有无 GPU 白苹果同构） |
+| Touch, power and volume buttons, brightness | `██░░░░░░░░` 20% | 🟡 | 内核 HID 触摸/按键注入已通（autoswipe 上滑 104 次实证）；用户态触摸客户端还没有做 |
+| Display and GPU (Adreno 840, Metal) | `██████░░░░` 60% | 🟡 | framebuffer/背光 + GPU/Metal 链路已打通（IOServiceOpen=0x0、pipeline/shader 真实渲染，fix14/15）；白苹果与 GPU 无关，桌面呈现还没有做 |
 | CPU (8 cores, frequency scaling, idle) | `██░░░░░░░░` 20% | 🟡 | 内核已在 byron 启动；调频/空闲还没有做 |
 | Battery gauge and charging | `░░░░░░░░░░` 0% | ⚪ | 还没有做 |
 | Thermal management | `░░░░░░░░░░` 0% | ⚪ | 还没有做 |

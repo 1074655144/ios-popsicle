@@ -59,6 +59,7 @@ issues.jsonl
 /ci-kernel-*/
 /ci-job-*.zip
 /ci-job-*.err
+/ci-log.zip
 /cloud_wifi_artifact/
 /cloud_wifi_kernel/
 /xnu_kernel_artifact.zip
@@ -73,5 +74,7 @@ issues.jsonl
 /wifi_range_headers.txt
 /wifi_runs.json
 
-# Local helpers that read product/serial data from firmware or device. Keep local only.
+# Local helpers and notes that contain device-specific values. Keep local only.
 /tools/_dump_*.py
+/docs/byron/SETUP_ASSISTANT_SPINNER.md
+/docs/byron/USB_DIAG_BOOT.md

@@ -626,3 +626,63 @@ dump 镜像内 plist（check_owner.py --cat）确认：
 
 ### 落盘
 - 仅追加本文档；无内核/镜像/工具改动，无实时数据入库。
+
+## 2026-11-22 真机执行：无 GPU 对照 boot + AUTOSWIPE → GPU 回归假设证伪
+
+用户要求"先用无 GPU 的方式跑看能不能进桌面"。本次**真机执行了**（Windows 本机，byron 19d05df2，
+全程 `fastboot boot` RAM，不刷分区/不解锁/不改 AVB）。结论：**无 GPU 与带 GPU 白苹果完全同构，
+GPU 不是白苹果原因；autoswipe 注入 104 次上滑仍进不了桌面 → SpringBoard 确实卡首启（用户态方向）。**
+
+### 执行链（含本机环境修复，均为 byron 适配，保留原作者逻辑）
+这台电脑被清理过，脚本写死的工具路径全失效，逐一修复：
+- `D:/Android/platform-tools` 不存在 → 用第三方搞机助手的 adb/fastboot 33.0.1 + 全部 55 个 DLL 复制补齐。
+- `tools/boot_ios.sh` 三处 byron 适配（均"保留原文+增补 byron"）：
+  ① 机型检查 `ro.product.device` 接受 `byron`（真机 fastboot product 实测就是 `byron`，原 `=pandora` 会拒绝启动）；
+  ② pinfile status 新格式 `pin_file=0 (0=pinned)`（原只认旧串 `pinned (GC move failures 0)`）；
+  ③ `extents --json` 尾注 `# extents=N` 过滤（否则 json.load 报 Extra data）+ payload 脚本改用当前仓库
+     动态 WSL 路径（原硬编码旧 `/mnt/d/work/ios_pandora`，把 payload 放进错仓库导致 loader build 找不到）。
+- `tools/safe_boot.sh` 同步 pinfile status 新格式。
+- NDK 目录已不存在，无法重编 loader → 新增 `tools/loader_repack.py`：从已验证的
+  `wsl-out/Image` 取骨架 0x39000，拼入新 payload.bin，更新 image_size，用 mkbootimg_v4 打包。
+  等价于 build.sh 的链接后步骤，绕过 NDK（loader C/汇编骨架跨 boot 不变，只有 payload 变）。
+
+### 本次 boot 参数（无 GPU 对照）
+KERNEL=/opt/work/kernel-agx/kernel.development.pandora（与 fix14/15 同一内核，隔离变量），
+cmdline 398/607：`... pandora_reboot_after=240 pandora_autoswipe=90 pandora_autoswipe_at=45
+pandora_fbdump=30 pandora_rtc_offset=... pandora_slot=a`，**无 pandora_gpu**。
+dry-run 全链通过（pinned/extents/HFSX/payload/cmdline）。07:55:15 `fastboot boot` OKAY。
+产品 `byron`（印证机型适配必须）。
+
+### 内核日志实证（device/logs/cpu_control.txt，180KB）
+- `28.2s PANDORA AUTOSWIPE: swiping the home screen for 90 s` → `71.8s 50 swipes` →
+  `114.5s 100 swipes` → `118.6s done, 104 swipes`；大量 `SWEET HID touch down/up` 坐实事件送达。
+- 内核层只有 5 次 `SWEET FB swap`（19.5–22.9s），之后到 240s 重启再无新帧提交 → 屏幕停在白苹果。
+- `240.267s pandora_reboot_after=240 ... resetting` → reboot_after 生效（之前误判未生效）。
+- fbdump 只在 21s 写 1 组（autoswipe 开始前），surface 帧是白苹果（cpu_control-surface.png）。
+
+### unified log 实证（ul_cpu_control.jsonl，93MB/6 trace，本机只读抓自 pinned root 镜像）
+关键计数 vs 带 GPU 的 fix15long2（几乎同构）：
+| 指标 | 无 GPU(cpu_control) | 带 GPU(fix15long2) |
+|---|---|---|
+| SpringBoard exec | 6 | 5 |
+| Apple Logo overlay | 12 | 10 |
+| No explicit screen owner | 18 | 15 |
+| BKBootUI timeout | 5 | 4 |
+| still in buddy | 6 | 5 |
+| removeOverlay | 0 | 0 |
+SpringBoard exec 6 次（11.2/14.4/14.5/15.4/19.6s...）重启循环，自身 unified log 0 行；
+25.7/29.0/30.4s 反复 Apple Logo overlay + No explicit screen owner；29.4s BKBootUIPresenter 超时。
+
+### 意外发现（修正对照实验设计）
+本次**没有** pandora_gpu 参数，但 backboardd 仍加载 pandora-metal 插件 TU_DEBUG=nocb、
+`backboardd has a device`、`no pipeline library` / `native-metal device refused VkResult(-3)`。
+→ Metal 用户态插件是默认加载的，与 pandora_gpu boot arg 无关（该 arg 只控制内核 AGX 硬件初始化）。
+所以"去 GPU 参数 = 无 Metal 对照"这一设计前提不成立；但正因如此，两次行为同构更说明白苹果与 GPU 无关。
+
+### 结论与方向
+- **GPU 回归假设证伪**：有无 GPU 都白苹果、都 SpringBoard 重启循环、都无 screen owner、removeOverlay 恒 0。
+- **显示层-only 假设也证伪**：autoswipe 真注入 104 次上滑，内核无新帧提交、桌面从未出现 → 不是"已进桌面只是 overlay 没移除"，而是 SpringBoard 真卡首启。
+- 回到用户态 buddy 方向：DA 框架 PastBuddy/still-in-buddy 判定源未置位（见前几节），但 owner/mode 与偏好内容均已排除。
+- 10 月 t18/t19 自检曾进主屏幕（device/DT_FINDINGS.md:119）与当前确定性卡 buddy 的差异仍未解释——
+  当时是老内核/老镜像，可能是某次后续改动引入的用户态回归，静态材料无法进一步定位。
+- 落盘：工具 boot_ios.sh/safe_boot.sh/loader_repack.py + 本文档；实时日志/镜像/截图未入库。

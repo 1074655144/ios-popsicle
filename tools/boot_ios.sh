@@ -48,12 +48,15 @@ su() { "$ADB" shell su -c "'$*'" | tr -d '\r'; }
 pinned_extents() {
 	local f=$1 st name last now
 	st=$(su "$P status $f"); echo "$st" >&2
-	case $st in *": pinned (GC move failures 0)"*) ;; *) echo "refused: $f not pinned or GC tried to move it" >&2; exit 1 ;; esac
+	# byron port: pinfile's status now prints "pin_file=0 (0=pinned)" (0 = GC move failures).
+	# Keep the original string too so both tool revisions are accepted.
+	case $st in *"pin_file=0 (0=pinned)"* | *": pinned (GC move failures 0)"*) ;; *) echo "refused: $f not pinned or GC tried to move it" >&2; exit 1 ;; esac
 	mkdir -p "$ROOT/device/extents"
 	name=$(basename "$f" .img)
 	last=$(ls -t "$ROOT/device/extents/$name"-*.json 2>/dev/null | head -1 || true)
 	now="$ROOT/device/extents/$name-$(date +%Y%m%d-%H%M%S).json"
-	su "$P extents $f --json" > "$now"
+	# byron port: pinfile's --json appends a human "# extents=N" line; strip it so the file is pure JSON.
+	su "$P extents $f --json" | grep -v '^#' > "$now"
 	if [ -n "$last" ] && ! cmp -s "$last" "$now"; then
 		echo "refused: extents of $f differ from $last (f2fs moved the file?)" >&2; exit 1
 	fi
@@ -63,7 +66,13 @@ pinned_extents() {
 wslpath_of() { echo "/mnt/$(echo "${1:1:1}" | tr A-Z a-z)${1:2}"; }
 
 echo "== 1. phone (Android)"
-[ "$("$ADB" shell getprop ro.product.device | tr -d '\r')" = pandora ] || { echo "no pandora on adb"; exit 1; }
+# byron port: upstream checked 'pandora'; byron reports 'byron' (profiles/byron.env CODENAME).
+# Accept both so the original pandora path is preserved and this fork's byron works.
+adb_dev=$("$ADB" shell getprop ro.product.device | tr -d '\r')
+case "$adb_dev" in
+pandora | byron) ;;
+*) echo "no pandora/byron on adb (got '$adb_dev')"; exit 1 ;;
+esac
 now=$(pinned_extents "$FILE")
 case $CHECK in
 pattern) su "$P rawcheck $FILE" | tail -1 | grep -q ", 0 do not" || { echo "refused: test pattern incomplete"; exit 1; } ;;
@@ -112,8 +121,11 @@ esac
 echo "== 2. payload (WSL, /opt/work/run$RUN)"
 # KERNEL=/opt/work/plk/kN-amfi.macho (tools/mkprelink.py) and TRUSTCACHE="IPSW trust cache..."
 # pass through to make_phone_payload.sh.
-wsl -d Ubuntu-24.04 -u root -- bash -c "KERNEL='${KERNEL:-}' TRUSTCACHE='${TRUSTCACHE:-}' ADTFLAGS='$ADTFLAGS' CPUS=$CPUS RD=$RD DEBUG=$DEBUG NAME=out \
-	bash <(tr -d '\r' < /mnt/d/work/ios_pandora/wsl/make_phone_payload.sh) /opt/work/run$RUN '$CMDLINE'" 2>&1 |
+# byron port: use THIS repo's payload script via its WSL path (was hardcoded to the old
+# /mnt/d/work/ios_pandora copy, which put payload.bin in a different repo and broke loader build).
+PAYLOAD_SH=$(wslpath_of "$ROOT/wsl/make_phone_payload.sh")
+wsl -d Ubuntu-24.04 -u root -- bash -c "KERNEL='${KERNEL:-}' TRUSTCACHE='${TRUSTCACHE:-}' ADTFLAGS='$ADTFLAGS' CPUS=$CPUS RD=$RD DEBUG=$DEBUG NAME=out REPO='$(wslpath_of "$ROOT")' \
+	bash <(tr -d '\r' < '$PAYLOAD_SH') /opt/work/run$RUN '$CMDLINE'" 2>&1 |
 	grep -v NodeJS | tail -3
 bash "$ROOT/shim/loader/build.sh" | tail -1
 strings_cmd=$(grep -a -o "debug=0x[0-9a-f]* serial=3 cpus=[0-9] [ -~]*" "$ROOT/shim/loader/out/payload.bin" | head -1)
@@ -133,7 +145,12 @@ seen=0
 for _ in $(seq 1 30); do sleep 2; "$FB" devices | grep -q fastboot && { seen=1; break; }; done
 # Without fastboot the phone goes on booting by itself (into the boot_b menu): stop here, nothing was booted.
 [ $seen = 1 ] || { echo "no fastboot device after 60 s: not booted"; exit 1; }
-[ "$("$FB" getvar product 2>&1 | sed -n 's/^product: //p' | tr -d '\r')" = pandora ] || { echo "fastboot device is not pandora"; exit 1; }
+# byron port: adb reports 'byron', fastboot may report 'pandora' or 'byron' — accept both.
+fb_prod=$("$FB" getvar product 2>&1 | sed -n 's/^product: //p' | tr -d '\r')
+case "$fb_prod" in
+pandora | byron) ;;
+*) echo "fastboot device is not pandora/byron (got '$fb_prod')"; exit 1 ;;
+esac
 out=$("$FB" boot "$(cygpath -w "$ROOT/shim/loader/out/loader-boot.img")" 2>&1) || { echo "$out"; echo "fastboot boot failed"; exit 1; }
 echo "$out"
 echo "$out" | grep -q "^Booting.*OKAY" || { echo "fastboot boot did not report Booting OKAY"; exit 1; }

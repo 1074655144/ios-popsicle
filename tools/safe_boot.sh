@@ -140,7 +140,8 @@ P=/data/local/tmp/pinfile
 for f in iosroot.img ioslog.img; do
 	st=$("$ADB" shell "su -c '$P status /data/local/tmp/$f'" 2>/dev/null | tr -d '\r')
 	case "$st" in
-	*': pinned (GC move failures 0)'*) ok "$f 已钉住且未被 GC 移动" ;;
+	# byron port: accept both the new "pin_file=0 (0=pinned)" and the original string.
+	*'pin_file=0 (0=pinned)'* | *': pinned (GC move failures 0)'*) ok "$f 已钉住且未被 GC 移动" ;;
 	*) bad "$f 未钉住或已移动: ${st:-无响应}" ;;
 	esac
 done

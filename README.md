@@ -32,7 +32,7 @@ Normal testing writes nothing to the phone's partitions. The kernel starts with 
 
 Below is the status of the Xiaomi 17 Max (`byron`) real device. The component names follow the original author's wording. Progress percentages and status colors are adjusted to what has actually been done on byron: 🟢 works · 🟡 partly works · 🟠 in progress · ⚪ not started. A note of **还没有做** means the item has not been done on byron. See **[docs/byron/LIVE_BRINGUP_STATUS.md](docs/byron/LIVE_BRINGUP_STATUS.md)** for the current RAM-boot evidence, **[docs/byron/OTHER_DEVICES_FINDINGS.md](docs/byron/OTHER_DEVICES_FINDINGS.md)** for the other-device comparison, and **[docs/byron/PHASE_CLOSEOUT.md](docs/byron/PHASE_CLOSEOUT.md)** for the earlier phase closeout.
 
-Reusable per-phone capture/build/log steps are in **[docs/PHONE_DATA_CAPTURE.md](docs/PHONE_DATA_CAPTURE.md)**. The last bootable WiFi bring-up toolchain and fixes are in **[docs/byron/WIFI_BRINGUP.md](docs/byron/WIFI_BRINGUP.md)**. Real-time phone data (extents, logs, screenshots, images, serial numbers) is intentionally not committed.
+Reusable per-phone capture/build/log steps are in **[docs/PHONE_DATA_CAPTURE.md](docs/PHONE_DATA_CAPTURE.md)**. The toolchain for the last bootable kernel with Wi-Fi driver changes is in **[docs/byron/WIFI_BRINGUP.md](docs/byron/WIFI_BRINGUP.md)**. Wi-Fi is **not fixed**: those changes only keep the kernel booting; all Wi-Fi rows below remain 0%. Real-time phone data (extents, logs, screenshots, images, serial numbers) is intentionally not committed.
 
 ### System
 
@@ -50,10 +50,10 @@ Reusable per-phone capture/build/log steps are in **[docs/PHONE_DATA_CAPTURE.md]
 
 | Component | Progress | Status | Notes |
 |---|---|---|---|
-| Wi-Fi: chip and firmware (WCN7880) | `░░░░░░░░░░` 0% | ⚪ | 还没有做 |
-| Wi-Fi: scan | `░░░░░░░░░░` 0% | ⚪ | 还没有做 |
-| Wi-Fi: connection and data | `░░░░░░░░░░` 0% | ⚪ | 还没有做 |
-| Wi-Fi: Settings panel and status icon | `░░░░░░░░░░` 0% | ⚪ | 还没有做 |
+| Wi-Fi: chip and firmware (WCN7880) | `░░░░░░░░░░` 0% | ⚪ | 驱动层改动已编入内核，但功能未修复：不可用 |
+| Wi-Fi: scan | `░░░░░░░░░░` 0% | ⚪ | 驱动层改动已编入内核，但扫描/QMI 超时，搜不到网络 |
+| Wi-Fi: connection and data | `░░░░░░░░░░` 0% | ⚪ | 未接通，功能未修复 |
+| Wi-Fi: Settings panel and status icon | `░░░░░░░░░░` 0% | ⚪ | 未接通：开关显示关闭、设置闪退，功能未修复 |
 | Modem firmware | `░░░░░░░░░░` 0% | ⚪ | 还没有做 |
 | 4G/5G, calls, SMS, SIM | `░░░░░░░░░░` 0% | ⚪ | 还没有做 |
 | Bluetooth | `░░░░░░░░░░` 0% | ⚪ | 还没有做 |

@@ -1,12 +1,12 @@
-# byron WiFi RAM-boot bring-up（可正常开机基线）
+# byron Wi-Fi 驱动 bring-up（可正常开机基线，Wi-Fi 功能未修复）
 
-本文档只保留可复现的工具、步骤和已纳入的修复。**不包含**任何从手机提取的镜像、固件、日志、extents、序列号、截图或设备隐私数据；这些产物一律留在本机并被 `.gitignore` 排除。
+本文档只保留可复现的工具、步骤和已纳入的驱动层改动。**Wi-Fi 功能并未修复**：这里只记录让内核能启动到桌面的阻塞项处理，不代表扫描、连接或设置开关可用。**不包含**任何从手机提取的镜像、固件、日志、extents、序列号、截图或设备隐私数据；这些产物一律留在本机并被 `.gitignore` 排除。
 
 全程只使用 `fastboot boot` 做 RAM 启动：不 `flash`、不 `unlock`、不改 AVB、不刷写系统分区。
 
 ## 1. 复现基线
 
-可正常进入 iOS 桌面的 WiFi 内核由以下四项组成：
+可正常进入 iOS 桌面的内核包含以下 Wi-Fi 相关驱动层改动（**不等于 Wi-Fi 可用**）：
 
 1. Ath12kWifi / WCN7880 `peach` 真实驱动替代 no-op stub。
 2. `nw_all.o` 仅导出 `xnu/patches/0361*` 需要的 27 个 ABI 符号，其余内部符号 internalize。
@@ -113,7 +113,7 @@ python3 tools/wlan/verify_patch.py xnu/patches/0348-popsicle-wlan-firmware.patch
    fastboot boot loader-boot.img
    ```
 
-## 7. 已纳入的修复点
+## 7. 已纳入的驱动层改动（非 Wi-Fi 修复）
 
 - **双 cluster 调度**：ADT 使用 `--amp`，避免 P-cluster 推荐线程无 cluster 可调度。
 - **USB 调试通道**：`pandora_usb=2 qcom-usb-debug=1` 启用 CDC ACM 串口，用于取内核日志；它不是 Apple 官方设备端口。
@@ -133,7 +133,7 @@ python3 tools/wlan/verify_patch.py xnu/patches/0348-popsicle-wlan-firmware.patch
 - SMMU 不再因缺少音频 group 返回 `ENOENT`。
 - 出现 `radio on applied`，说明驱动自检完成。
 - 出现 `exec SpringBoard`，屏幕进入桌面。
-- Wi-Fi 仍可能扫描不到网络；这是当前未完成的 bring-up 项，不代表本基线失败。
+- **Wi-Fi 未修复**：扫描超时、搜不到网络、设置开关与状态图标未接通，README 中 Wi-Fi 各项保持 0%。这只代表“能进桌面”的基线成立，不代表 Wi-Fi 功能完成。
 
 ## 9. 隐私边界
 

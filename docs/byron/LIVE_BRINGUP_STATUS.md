@@ -686,3 +686,97 @@ SpringBoard exec 6 次（11.2/14.4/14.5/15.4/19.6s...）重启循环，自身 un
 - 10 月 t18/t19 自检曾进主屏幕（device/DT_FINDINGS.md:119）与当前确定性卡 buddy 的差异仍未解释——
   当时是老内核/老镜像，可能是某次后续改动引入的用户态回归，静态材料无法进一步定位。
 - 落盘：工具 boot_ios.sh/safe_boot.sh/loader_repack.py + 本文档；实时日志/镜像/截图未入库。
+
+## 2026-11-22 再诊断（动手前）：两处此前结论需要更正
+
+### 更正一："SpringBoard exec 6 次 = 重启循环"是跨 boot 求和错误
+把 `ul_cpu_control.jsonl` 按 `boot_uuid` 分组后，六个 boot **每个都只有 1 次**
+`exec SpringBoard`、1 次 `System shell connected`、1 组 Apple Logo overlay /
+`First boot:` / BKBootUIPresenter 超时。此前把 6 次 exec 当成一次开机内的重启循环，
+是把同一份 jsonl 里六个不同 boot 的事件按时间混排求和造成的假象。
+SpringBoard 是**启动一次后一直在跑但没完成首启**，不是反复崩溃。
+新增只读工具 `tools/ul_buddy_check.py`（按 boot_uuid 分组统计），避免再犯同类错误。
+
+### 更正二：镜像里其实**没有** data_ark.plist
+构建日志 `/opt/work/imgbuild.log:19` 明确写着：
+```
+warning: no mobileactivationd system container; skipped data ark
+```
+即 `sweet-root-tweaks.py:38-45` 的 `activation()` 因找不到
+`com.apple.mobileactivationd` 容器而**整段跳过**，此前文档里"已写 data_ark"是错的。
+用 HFS catalog 只读遍历 `/opt/work/iosroot.img` 也确认没有任何 `data_ark` 文件。
+从 cryptex DMG 构建的 root 没有真实设备的 `/private/var` 状态；
+`FirstPurpleBuddyCompletion` / `com.apple.purplebuddy-SetupState` 这些已越狱设备上的
+首启完成记录全部缺失。`cloudpaird: buddy is done` 与 `remindd: PastBuddy=0` 判定相反，
+最合理的解释就是两者查的源不同：前者看激活标志（ADT 四键已满足），后者看 data_ark
+里的首启完成时间。这是"偏好写对了但仍卡 buddy"的直接缺口。
+
+### 本轮动作（不刷机、不解锁、不改 AVB）
+1. 新增 `tools/buddy_seed_pack.py`：在现有 pinned 固件包基础上追加
+   `/private/var/root/Library/Lockdown/data_ark.plist` 与
+   `/private/var/containers/Data/System/com.apple.mobileactivationd/Library/internal/data_ark.plist`
+   （含 `-ActivationState=Activated`、`FirstPurpleBuddyCompletion`、
+   `com.apple.purplebuddy-SetupState=SetupUsingAssistant` 等），
+   并覆盖 `com.apple.purplebuddy.plist` 补 `SetupState` / `SetupLastExit`。
+   复用内核 `pandora_files` 安装器（patch 0147/0185），root 卷挂载后约 2 秒写入，
+   早于 cfprefsd / DA 框架读取。
+2. 用 `pinfile rawwrite` 把新包写进已固定的 `/data/local/tmp/adspfw2.img`（39.7 MiB，
+   12 段 extents 不变），回读 files.txt 确认七行新增项落盘。
+3. f2fs 期间移动过 iosroot extents（5548→5543 段），按当前 extents 重建 ADT/payload，
+   用 `loader_repack.py`（NDK 缺失）换 payload，保持 cmdline 与上次无 GPU boot 一致，
+   仅把 autoswipe 改为 120 s、fbdump 20 s。`fastboot boot` 已 OKAY（产品 byron）。
+4. 判定看真机回安卓后的 unified log：`PastBuddy is 1`、`removeOverlay>0`、
+   fbdump/截图出现主屏幕即为成功；仍为 0 则说明 data_ark 也不是 DA 的判定源。
+
+## 2026-11-22 09:45 重大更正：buddyseed1~3 三次启动其实都死在 loader，没进 XNU
+
+用户拍下的两张真机照片（IMG_20261122_092747 / 094146）显示蓝屏 loader 错误：
+```
+PANDORA  loader v2 - nothing is written to storage
+LOADED   0x00000000c7a??000
+ERROR    ADT/boot_args outside kernel RAM
+```
+即上一轮 buddyseed1/2/3 三次 `fastboot boot` **全部在 loader 地址校验处 abort**，
+从未进入 XNU。所以那三轮抓的 unified log / kernel_ring 全是上一次成功启动的旧数据，
+"data_ark 写入后仍卡 buddy" 的判断无效，需要作废重做。
+
+### 根因：loader_repack.py 替换 payload 字节但没有重算链接期边界
+`shim/loader/loader.c` 用 `_payload_start`/`_payload_end`（链接期常量）算 payload 范围，
+校验 `p->adt_off + p->adt_size > pl_end - pl` 就报此错。
+- 旧 payload：`adt_off+adt_size = 0x102f054`，旧 `_payload_end-_payload_start = 0x102f0e0`，通过。
+- 新 payload（ADT 因 extents 变多而增大）：`0x1008ee0+0x262cc = 0x102f1ac` > `0x102f0e0`，失败。
+`loader_repack.py` 只把新 payload 拼到旧 loader 骨架后面，链接符号没有更新，
+导致 loader 认为 ADT 超出 payload 边界而拒绝启动。
+
+### 修复
+用 WSL 交叉工具链按新 payload 完整重建 loader（`OUT=buddyseed1 bash build_wsl.sh`）：
+`_payload_start=0x39000`，`_payload_end=0x10681b0` ≥ ADT 末尾 `0x10681ac`。
+bootimg sha256=7329cc21... 已 `fastboot boot` OKAY。等待回安卓抓真实日志验证。
+
+## buddyseed4：loader 修复后的首次真实启动（09:45–09:49）
+
+用 WSL 交叉工具链按新 payload 完整重建 loader（`_payload_end=0x10681b0`），
+`fastboot boot` OKAY，内核完整跑 180 s（有 autoswipe、按键截图、PANDORA IO 汇报），
+这是 loader 回归以来第一次真正进入 XNU。抓取 `captures/buddyseed4`：
+- kernel_ring 187000 B / flush 58；unified log `ul_buddyseed4.jsonl` 10.6 MB（13802 行，
+  但只覆盖启动后 0–14 s：01:45:52→01:46:06，之后未再持久化）。
+- buddy 状态：每 boot 1 次 `exec SpringBoard` / `System shell connected` / `First boot:`，
+  `still in buddy`=1，`cloudpaird: buddy is done`，`remindd: RDAccountInitializer: We are still in buddy`，
+  `nanoregistryd: com.apple.purplebuddy.setupexited.enabled prefs value 0→2`，
+  `Current bootUI is an Apple Logo`=2，`No explicit screen owner`=3，`removeOverlay`=0。
+  **结论：data_ark / purplebuddy 种子写对了（偏好确实被读取），但 PastBuddy 仍被判 0，未跳过首启。**
+- 前台会话（决定性、与 fix15long 完全一致）：
+  `diskLoadUserSessions failed → NO USER SESSIONS → Creating New Primary Session uid 501`，
+  `failed to read nextsession dict`、`Unable to Obtained foreground, curFG:502, nextID:-1`、
+  `FAILED to Set Foreground ID`、`BootedUser is:501`；
+  `persona.kb` 不存在。镜像 `/private/var/keybags` 只有 systembag.kb，
+  无 usermanagerd session 存储、无 persona.kb。
+- `exec loginwindow`=0（内核与 unified log 都查无 loginwindow 字样），SpringBoard 从未成为
+  explicit screen owner，Apple Logo overlay 从不被移除 → 白苹果。
+
+### 判断
+data_ark 方向已排除（写对了仍 PastBuddy=0）。当前唯一稳定的卡点是 **usermanagerd
+foreground session 建立失败 → loginwindow 不启动**，根因是 cryptex root 缺 `/private/var`
+持久状态（session table / persona.kb / keybags），这是 RAM boot 从零构建 root 的固有缺口，
+不是某个 boot-arg/ADT 能绕过。继续盲目试错性价比很低，需要用户在"深入用户态"与"暂停"
+之间选方向（见对话）。

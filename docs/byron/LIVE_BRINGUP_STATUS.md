@@ -856,3 +856,38 @@ iOS 完整合成 + 一系列守护进程逐个修复（SWEET_LESSONS 第19条：
 重建 payload 把 reboot_after 拉到 600 s、fbdump 300 s，用 WSL 交叉工具链
 完整重建 loader（非 repack，边界正确），`fastboot boot` OKAY（byron）。
 用户实测等到 6 分钟以上：**仍全程白苹果**。等待不足假设排除。
+
+## 2026-11-22 10:40 longwait1：长等待排除 + 崩溃循环排除 + 卡点回到 SpringBoard 自身
+
+### 社区对照结论（见上节）已把静态状态全部对齐，唯一未验证变量是等待时间 → 本轮排除
+- payload `pandora_reboot_after=600`（10 min）、`pandora_fbdump=300`，WSL 完整重建 loader（非 repack），
+  `fastboot boot` OKAY。用户实测等到 >6 min：**全程白苹果**。等待不足假设排除。
+- 内核 ring 228834 B/flush 146，跑满 600 s（600.405 触发 reboot_after）。
+- unified log 16.96 MB 但**只覆盖启动后 0–22.7 s**（02:10:01→02:10:22.689，22355 行），
+  22.7 s 后 logd 再无持久化。此前"只覆盖 14 s"是同一现象（log 持久化在早期停）。
+- frame swap 只在 19–22 s 有 5 次（surface 2/3），**之后再无 swap**；fbdump=300 因绑定 swap 从未触发。
+  → 系统渲染在 22 s 停住，不是"慢慢首启"。
+
+### 崩溃循环：确认存在但被内核正确处理，非根因
+- `exec bluetoothd/fairplayd.H2 blocked (sweetnoexec)` 生效；
+  `33.602 CRASH ... 3 crashes this boot, not started again (sweetcrashstop)` 生效。
+- 22 s 前后大量 `ReportCrash ... 309 report` / `backboardd mach_msg msg too large` 是 crash 噪音，
+  33 s 后 bluetoothd/fairplayd 被彻底停掉，系统继续跑。排除。
+
+### 真正卡点（与长期诊断一致，再确认）
+- backboardd 14.637–14.954：`Current bootUI is an Apple Logo` ×2、
+  `updateOverlay: No explicit screen owner` ×3、`addOverlay(...)`、
+  `System shell connected`（SpringBoard bundle），`First boot: systemShellWillBootstrap`，
+  `start Data Migration... ready`、`Bootstrap system shells ready`；
+  14.954 `1005062D0 system activity assertion timed out: BKBootUIPresenter`。
+- `SpringBoard` 作为 process 的 unified log **0 条**（pid 26 自 1.452 s exec 后 running-active 但无自身输出）。
+- `remindd: DAAgentManager: Device PastBuddy is 0`、`still in buddy`；
+  `nanoregistryd: purplebuddy.setupexited.enabled 0→2`。
+- 唯一 stable 卡点仍是 **SpringBoard exec 后自身初始化未完成 → 不成为 explicit screen owner
+  → BKBootUI assertion 超时 → Apple Logo overlay 永不移除**。
+
+### 判断
+可静态确认的所有项（内核补丁 370 / boot args / ADT 含 4 个 security-status / 5 组 skip-setup 偏好 /
+4 容器目录 / launchd / data_ark / 内核 22.6=xnu-8796.141.3 与 root 16.7.16 匹配）全部对齐上游。
+进一步定位必须动态调试或反汇编 SpringBoard 的 screen-owner 声明路径 / 首启初始化，
+日志已无新增信息。请用户在"反汇编 SpringBoard"与"暂停"之间选方向。

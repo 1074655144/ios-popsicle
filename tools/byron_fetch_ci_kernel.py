@@ -84,9 +84,12 @@ def main():
     if not match:
         raise SystemExit('artifacts: ' + ', '.join(a.get('name', '?') for a in arts))
     art = match[0]
-    print(f"artifact: {art['name']} ({art.get('size', 0)} bytes), expired={art.get('expired')}")
+    size = art.get('size_in_bytes', art.get('size', 0))
+    print(f"artifact: {art['name']} ({size} bytes), expired={art.get('expired')}")
 
-    blob = fetch(op, art['archive_download_url'], tok, accept='application/zip')
+    # Use GitHub's default Accept header for archive_download_url; the response
+    # redirects to a signed blob storage URL.
+    blob = fetch(op, art['archive_download_url'], tok)
     os.makedirs(out, exist_ok=True)
     with zipfile.ZipFile(io.BytesIO(blob)) as z:
         for info in z.infolist():

@@ -11,7 +11,7 @@ xnu 0348: Wi-Fi firmware through MHI (BHI, READY, M0, BHIe, polled), SMMU pass-t
  		if (!md) {
  			return ENOMEM;
  		}
-@@ -3183,8 +3183,76 @@
+@@ -3183,8 +3183,94 @@
  			ad_wait(now < fast_until ? 20 : 500);
  		} else {
  			ad_sleep(now < fast_until ? 1 : 50);
@@ -70,6 +70,24 @@ xnu 0348: Wi-Fi firmware through MHI (BHI, READY, M0, BHIe, polled), SMMU pass-t
 +			err = EEXIST;
 +		}
  	}
++	if (!err && !have) {
++		/* No audio group to copy (the ADSP never made one): the last context bank becomes a
++		 * bypass bank and the stream points at it. The firmware turns a bypassing S2CR into
++		 * something else (it reads back 0x200ff), so a translating S2CR to that bank is what
++		 * works: the same shape the audio passthrough writes (0233). */
++		const unsigned nbanks = SR(0x24) & 0xff;
++		const uint32_t pg = (SR(0x24) & (1u << 31)) ? 0x10000u : 0x1000u;
++		const unsigned npage = 1u << (((SR(0x24) >> 28) & 7) + 1);
++		if (nbanks && slot != nsmr) {
++			const unsigned last = nbanks - 1;
++			SR((npage + last) * pg) = 0;			/* SCTLR: translation off */
++			SR(pg + 4 * last) = 0x10000u;			/* CBAR: bypass */
++			__asm__ volatile ("dsb sy" ::: "memory");
++			s2cr = (uint32_t)last;				/* type 0 (translating), bank = last */
++			have = true;
++			printf("PANDORA SMMU: streams %#x: no audio group, bypass bank %u (S2CR %08x)\n", id, last, s2cr);
++		}
++	}
 +	if (!err && (!have || slot == nsmr)) {
 +		printf("PANDORA SMMU: streams %#x: no audio group to copy (%d) or no free group\n", id, have);
 +		err = ENOENT;

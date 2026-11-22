@@ -629,7 +629,7 @@ dump 镜像内 plist（check_owner.py --cat）确认：
 
 ## 2026-11-22 真机执行：无 GPU 对照 boot + AUTOSWIPE → GPU 回归假设证伪
 
-用户要求"先用无 GPU 的方式跑看能不能进桌面"。本次**真机执行了**（Windows 本机，byron 19d05df2，
+用户要求"先用无 GPU 的方式跑看能不能进桌面"。本次**真机执行了**（Windows 本机，byron <device-id>，
 全程 `fastboot boot` RAM，不刷分区/不解锁/不改 AVB）。结论：**无 GPU 与带 GPU 白苹果完全同构，
 GPU 不是白苹果原因；autoswipe 注入 104 次上滑仍进不了桌面 → SpringBoard 确实卡首启（用户态方向）。**
 

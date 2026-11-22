@@ -53,3 +53,25 @@ pandora_shot_*.png
 
 # unified-log parser runtime issues (device data)
 issues.jsonl
+
+# Local CI download/artifact directories and experiment reports. Rebuild them; never commit.
+/ci-art/
+/ci-kernel-*/
+/ci-job-*.zip
+/ci-job-*.err
+/cloud_wifi_artifact/
+/cloud_wifi_kernel/
+/xnu_kernel_artifact.zip
+/xnu_kernel_wifi.zip
+/wifi_job.html
+/wifi_job_logs.zip
+/wifi_jobs.json
+/wifi2_jobs.json
+/wifi_checks.json
+/wifi_final_artifacts.json
+/wifi_meta.json
+/wifi_range_headers.txt
+/wifi_runs.json
+
+# Local helpers that read product/serial data from firmware or device. Keep local only.
+/tools/_dump_*.py

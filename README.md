@@ -32,15 +32,15 @@ Normal testing writes nothing to the phone's partitions. The kernel starts with 
 
 Below is the status of the Xiaomi 17 Max (`byron`) real device. The component names follow the original author's wording. Progress percentages and status colors are adjusted to what has actually been done on byron: 🟢 works · 🟡 partly works · 🟠 in progress · ⚪ not started. A note of **还没有做** means the item has not been done on byron. See **[docs/byron/LIVE_BRINGUP_STATUS.md](docs/byron/LIVE_BRINGUP_STATUS.md)** for the current RAM-boot evidence, **[docs/byron/OTHER_DEVICES_FINDINGS.md](docs/byron/OTHER_DEVICES_FINDINGS.md)** for the other-device comparison, and **[docs/byron/PHASE_CLOSEOUT.md](docs/byron/PHASE_CLOSEOUT.md)** for the earlier phase closeout.
 
-Reusable per-phone capture/build/log steps are in **[docs/PHONE_DATA_CAPTURE.md](docs/PHONE_DATA_CAPTURE.md)**. Real-time phone data (extents, logs, screenshots, images) is intentionally not committed.
+Reusable per-phone capture/build/log steps are in **[docs/PHONE_DATA_CAPTURE.md](docs/PHONE_DATA_CAPTURE.md)**. The last bootable WiFi bring-up toolchain and fixes are in **[docs/byron/WIFI_BRINGUP.md](docs/byron/WIFI_BRINGUP.md)**. Real-time phone data (extents, logs, screenshots, images, serial numbers) is intentionally not committed.
 
 ### System
 
 | Component | Progress | Status | Notes |
 |---|---|---|---|
-| Boot, lock screen, home screen, built-in apps | `██░░░░░░░░` 20% | 🟠 | RAM 启动到白苹果；SpringBoard 重启循环 6 次、无 screen owner；锁屏/桌面/内置应用还没有做。GPU 已证伪非原因（有无 GPU 白苹果同构） |
-| Touch, power and volume buttons, brightness | `██░░░░░░░░` 20% | 🟡 | 内核 HID 触摸/按键注入已通（autoswipe 上滑 104 次实证）；用户态触摸客户端还没有做 |
-| Display and GPU (Adreno 840, Metal) | `██████░░░░` 60% | 🟡 | framebuffer/背光 + GPU/Metal 链路已打通（IOServiceOpen=0x0、pipeline/shader 真实渲染，fix14/15）；白苹果与 GPU 无关，桌面呈现还没有做 |
+| Boot, lock screen, home screen, built-in apps | `████░░░░░░` 40% | 🟠 | ADT 加 `--amp` 双 cluster 后已进桌面；锁屏/内置应用还没有做。`pandora_gpu=15` 让硬件 scanout 接管（600 帧硬件缩放/0 CPU 拷贝/0 故障），花屏已按日志层修复、待肉眼确认。详见 docs/byron/LIVE_BRINGUP_STATUS.md |
+| Touch, power and volume buttons, brightness | `██░░░░░░░░` 20% | 🟡 | 内核 HID 触摸/按键注入已通（autoswipe 上滑 104 次实证）；桌面触控偶尔乱跑，疑因面板常量 1220x2656 未按 byron 的 1200x2608 修正 |
+| Display and GPU (Adreno 840, Metal) | `███████░░░` 70% | 🟡 | framebuffer/背光 + GPU/Metal 链路已打通（IOServiceOpen=0x0、pipeline/shader 真实渲染）；`pandora_gpu=15` 下 Metal 客户端成功、DPU 硬件 scanout 600 帧/0 拷贝/0 故障 |
 | CPU (8 cores, frequency scaling, idle) | `██░░░░░░░░` 20% | 🟡 | 内核已在 byron 启动；调频/空闲还没有做 |
 | Battery gauge and charging | `░░░░░░░░░░` 0% | ⚪ | 还没有做 |
 | Thermal management | `░░░░░░░░░░` 0% | ⚪ | 还没有做 |
@@ -57,7 +57,7 @@ Reusable per-phone capture/build/log steps are in **[docs/PHONE_DATA_CAPTURE.md]
 | Modem firmware | `░░░░░░░░░░` 0% | ⚪ | 还没有做 |
 | 4G/5G, calls, SMS, SIM | `░░░░░░░░░░` 0% | ⚪ | 还没有做 |
 | Bluetooth | `░░░░░░░░░░` 0% | ⚪ | 还没有做 |
-| USB | `░░░░░░░░░░` 0% | ⚪ | 还没有做 |
+| USB | `██░░░░░░░░` 20% | 🟡 | CDC ACM 调试串口已打通：内核日志/截图/重启走 USB，`pandora_usb=2 qcom-usb-debug=1`（docs/byron/USB_DIAG_BOOT.md）。这是调试串口，不是 Apple 官方设备端口 |
 | NFC, GPS | `░░░░░░░░░░` 0% | ⚪ | 还没有做 |
 
 ### Media and sensors

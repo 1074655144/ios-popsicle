@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
 """透视校正 stridescan 手机照片，并分析每个横带的条纹周期与竖直度。"""
+import os
 import sys
 import numpy as np
 from PIL import Image
 
-PHOTO = sys.argv[1] if len(sys.argv) > 1 else r"C:\Users\qq107\.workbuddy\clipboard-images\clipboard-2026-11-21T06-38-35-688Z-5f67e504.jpg"
-OUTDIR = r"C:\Users\qq107\WorkBuddy\2026-11-14-14-16-35\ios-popsicle\device\byron\live"
+if len(sys.argv) < 2:
+    raise SystemExit('usage: analyze_stridescan_photo.py PHOTO [OUTDIR]')
+PHOTO = sys.argv[1]
+OUTDIR = sys.argv[2] if len(sys.argv) > 2 else os.environ.get(
+    'STRIDESCAN_OUTDIR',
+    os.path.join(os.path.dirname(__file__), '..', '..', 'device', 'byron', 'live'),
+)
 SCALE = 2.0  # 缩略图(720x960)坐标 -> 原图(1440x1920)
 
 img = Image.open(PHOTO).convert("RGB")

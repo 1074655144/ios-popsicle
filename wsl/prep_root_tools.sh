@@ -12,6 +12,7 @@ MIRROR=https://ghfast.top/https://github.com/
 # Override IPSW=... for a different build. Windows path: F:/i4Tools9/Firmware/...
 IPSW=${IPSW:-/mnt/f/i4Tools9/Firmware/iPhone10,3,iPhone10,6_16.7.16_20H392_Restore.ipsw}
 W=/opt/work
+REPO=${REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
 log() { echo "== $(date +%T) $*"; }
 
 log apt
@@ -47,8 +48,8 @@ log "ipsw images"
 mkdir -p $W/ipsw && cd $W/ipsw
 # Derive build-specific names from THIS IPSW first (the tool reads BuildManifest.plist
 # straight out of the .ipsw zip, no extraction needed). Nothing is hard-coded per build.
-ASSETS=${IPSW_ASSETS:-/mnt/c/Users/qq107/WorkBuddy/2026-11-14-14-16-35/ios-popsicle/device/byron/ipsw_assets.env}
-python3 /mnt/c/Users/qq107/WorkBuddy/2026-11-14-14-16-35/ios-popsicle/tools/port/discover_ipsw_assets.py \
+ASSETS=${IPSW_ASSETS:-$REPO/device/byron/ipsw_assets.env}
+python3 "$REPO/tools/port/discover_ipsw_assets.py" \
 	"$IPSW" -o "$ASSETS" 2>&1 | tail -5
 # shellcheck disable=SC1090
 . "$ASSETS"

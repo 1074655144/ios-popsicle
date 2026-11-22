@@ -131,6 +131,17 @@ KERNEL=<thin-macho> RD=ufsroot0 bash make_phone_payload.sh /opt/work/runTEST 'de
 
 ---
 
+## 6. 真 Wi-Fi 驱动内核
+
+- 目标：把 `xnu/vendor/nw_all.o` 从 no-op stub 换成 Ath12kWifi / WCN7880 `peach` 的真实驱动，并保留 `pandora_wlan=2` 启动参数。
+- 构建脚本：`tools/wlan/build_nw_bc.py` 把驱动源码编成 LLVM bitcode，`tools/wlan/link_nw_all.sh` 合并 bitcode 后只保留 `xnu/patches/0361*` 所需的 27 个 ABI 符号为 external，内部符号全部 internalize，再编成 Mach-O object；`tools/wlan/check_abi.py` 验证 ABI 27/27。
+- `tools/wlan/patch_credit.py` 关闭 host 侧 WMI credit flow control，保留 firmware 自己的计数不变。
+- CI：`xnu/vendor/nw_all.o` 是本地生成物，不入库；用 `tools/byron_fetch_ci_kernel.py` 取回内核产物。
+- 组装：`tools/swap_kernel_payload.py` 只替换 payload 中的内核段，复用旧 payload 的 ADT、完整 cmdline 区块和 TrustCache 段。cmdline 字段必须整段复制，不要只写回截短字符串。
+- 可复现步骤与启动参数见 `docs/byron/WIFI_BRINGUP.md`。全程 `fastboot boot`，不刷分区。
+
+---
+
 ## 5. 关键事实备查
 
 - CI workflow: `.github/workflows/xnu.yml`，`runs-on: macos-15`（原 `macos-14` 已退役），`timeout-minutes: 120`，`workflow_dispatch` 手动触发

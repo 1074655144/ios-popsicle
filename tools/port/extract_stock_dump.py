@@ -186,11 +186,14 @@ def main():
         ci = read_ext4_file(persist, '/display/cell_id_0.txt', 'cellId')
         if ci and len(ci) < 128:
             calib['cell_id'] = ci.decode('ascii', 'ignore').strip()
-        dj = read_ext4_file(persist, '/display/demura_calib_file_journal_000021000000046e.xml', 'demura')
-        if dj and b'PanelId' in dj:
-            m = re.search(rb'PanelId="([0-9a-f]+)"', dj)
-            if m:
-                calib['demura_panel_id'] = m.group(1).decode()
+        # Device-specific journal filename is supplied locally; never hard-code it here.
+        demura_name = os.environ.get('DEMURA_FILE', '')
+        if demura_name:
+            dj = read_ext4_file(persist, '/display/' + demura_name, 'demura')
+            if dj and b'PanelId' in dj:
+                m = re.search(rb'PanelId="([0-9a-f]+)"', dj)
+                if m:
+                    calib['demura_panel_id'] = m.group(1).decode()
         mac = read_ext4_file(persist, '/wlan/wlan_mac.bin', 'wlanMac')
         if mac and b'wlan0=' in mac:
             calib['wlan_mac'] = mac.decode('ascii', 'ignore').strip()

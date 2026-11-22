@@ -17,7 +17,7 @@
 | `wifi_chip` | `qcom,wcn786x` | dtbo DTB 的 `wcn786x` 节点 |
 | 触摸主控 | `synaptics,tcm-spi` | dtbo DTB（与 OTA 一致） |
 | 功放 | `tfa98xx_1@34` + 双通道校准 | dtbo DTB + persist/audio/tfa_calr.txt |
-| 面板 ID | `000021000000046e` / cell `AFG564N0ARA41` | persist/display/（demura + cell_id） |
+| 面板 ID | 本机采集，占位符不入库 | persist/display/（demura + cell_id） |
 | Wi-Fi MAC | device-specific, local only | persist/wlan/wlan_mac.bin |
 
 > 注意：popsicle 的功放是 CS35L43，byron 是 **tfa98xx**——这是必须改驱动的新差异。

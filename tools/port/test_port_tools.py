@@ -516,7 +516,7 @@ elif args[0] == "shell":
         import importlib.util
         spec = importlib.util.spec_from_file_location('esd', os.path.join(HERE, 'extract_stock_dump.py'))
         esd = importlib.util.module_from_spec(spec); spec.loader.exec_module(esd)
-        ok(esd._wsl_path('C:/Users/qq107/x.img') == '/mnt/c/Users/qq107/x.img',
+        ok(esd._wsl_path('C:/Users/tester/x.img') == '/mnt/c/Users/tester/x.img',
            'stock dump: Windows 路径转 WSL /mnt/c 正确')
         fake = {
             'facts': {
@@ -526,8 +526,8 @@ elif args[0] == "shell":
                     'wlan_chip': {'node': 'wcn786x', 'compatible': []},
                     'audio_amp': {'node': 'tfa98xx_1@34', 'compatible': []},
                 },
-                'calibration': {'demura_panel_id': '000021000000046e', 'cell_id': 'AFG564N0ARA41',
-                                'wlan_mac': 'wlan0=08b339964c34'},
+                'calibration': {'demura_panel_id': '0000000000000000', 'cell_id': 'TESTCELL000000',
+                                'wlan_mac': 'wlan0=000000000000'},
             }
         }
         fp = os.path.join(T, 'stock.json')
@@ -537,7 +537,7 @@ elif args[0] == "shell":
         mapped = gbc.parse_stock_dump(fp)
         ok('ti,bq27z561_master' in mapped.get('battery_gauge', ''), 'stock dump: 电量计型号映射')
         ok(mapped.get('wifi_chip') == 'wcn786x', 'stock dump: Wi-Fi 芯片映射')
-        ok(mapped.get('panel_id') == '000021000000046e', 'stock dump: 面板 ID 映射')
+        ok(mapped.get('panel_id') == '0000000000000000', 'stock dump: 面板 ID 映射')
         # stock data must never fabricate runtime-only fields
         for k in ('memory_banks', 'splash_size', 'fb_w', 'tlmm_base_real', 'page_size_16k'):
             ok(k not in mapped, 'stock dump: 不伪造运行时字段 %s' % k)

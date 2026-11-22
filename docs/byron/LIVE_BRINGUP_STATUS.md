@@ -780,3 +780,44 @@ foreground session 建立失败 → loginwindow 不启动**，根因是 cryptex 
 持久状态（session table / persona.kb / keybags），这是 RAM boot 从零构建 root 的固有缺口，
 不是某个 boot-arg/ADT 能绕过。继续盲目试错性价比很低，需要用户在"深入用户态"与"暂停"
 之间选方向（见对话）。
+
+## 2026-11-22 深挖用户态会话链路：根因定位与上游对照（未进桌面）
+
+### usermanagerd 前台会话失败的确切成因（反汇编 /usr/libexec/usermanagerd 得到）
+从 HFS root 提取 usermanagerd（684 KB，独立 Mach-O，不在 dyld cache）。其字符串与启动日志
+拼出完整链路：
+```
+DMNextSessionSetup session for reboot → enCryptnextsession → SaveNextSession BLOB
+  → /private/var/keybags/nextsession.kb (+ nextsession_opaque.kb / nextsession_SBD_opaque.kb)
+读回：failed to get data blob out of read nextsession.kb
+    → deCryptnextsession → failed to read nextsession dict
+    → Unable to Obtained foreground, curFG:502, nextID:-1
+    → Failed to get next session, booting with default id to be Loginwindow UID
+    → CurrentsessionID:-1 → FAILED to Set Foreground ID
+```
+- `nextsession.kb` 是真机**正常关机时** usermanagerd 写的加密 BLOB，记录下次启动的前台 session。
+- 我们的 cryptex root 只有 `systembag.kb`，无 `nextsession.kb` / `persona.kb` / usersession.kb。
+- RAM boot 从零起且从不正常关机 → 永远读不到 nextsession → foreground 永远 -1。
+- usermanagerd 读 `kern.bootargs`，但无现成 boot-arg 能跳过 nextsession（二进制里的开关只有
+  STOP AUTO BUBBLE / EDS debug / BOOTEDUSER 等，不覆盖 foreground 决策）。
+- 该 BLOB 用 device key 加密，PC 侧无法离线构造。
+
+### 但上游对照推翻了"这是根因"的判断
+- upstream-ref/xnu/patches 与我方 **370 个完全一致**，无差异。
+- boot args BASE 完全一致（ufsrw/rootrw/unentitled_ios_sim_launch/ignition_level/
+  wdt_test=no_user_checkin/launchd_unsecure_cache/wdt=-1/sweetfb_hz=30/sweetfb_fill=1/
+  sweetnoexec=bluetoothd,fairplayd.H2），debug=0x8 一致。
+- ADT 合成 ECID `0x50414e444f524101` 一致。
+- 上游 root 也由 ios-fuxi mkiosroot.sh（cryptex）构建，同样没有 nextsession.kb。
+- 上游 GPU_PLAN.md 实测 **GPU 合成桌面 / 锁屏 / 主屏幕 = 通过（bb9、bb18）**，
+  autoswipe 自动解锁翻页跑通。即：上游在同样"无 nextsession.kb、同样 UMD 前台失败"的条件下
+  仍能进桌面 → **UMD 前台失败是无害 warning，不是白苹果根因**。
+
+### 结论与唯一剩余差异
+可确认的三项（内核/boot args/ADT）全部与已进桌面的上游一致；data_ark 已排除；
+UMD 前台已排除。剩余唯一系统性差异是 **root 镜像内容本身**：上游 12 GB 镜像来自真实
+iOS 完整合成 + 一系列守护进程逐个修复（SWEET_LESSONS 第19条：跳过设置向导、修复每次
+开机重跑的数据迁移），我们是 cryptex + 少量手工补文件。白苹果卡点应在 root 里某个
+"首启完成/设置向导跳过"状态缺失，需要逐项 diff 两份 root 的 /private/var 与 plist，
+而非继续改内核或 boot args。此方向需要上游完整的 ios-fuxi 镜像构建脚本与成品 root，
+不在当前 upstream-ref 快照内。
